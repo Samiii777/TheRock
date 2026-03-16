@@ -90,6 +90,7 @@ A convenience path to the most recently installed version should be maintained w
 ```
 C:\rocm\core  ->  C:\rocm\core-8.2
 C:\rocm\core-8  ->  C:\rocm\core-8.2
+C:\rocm\raytracing-8  ->  C:\rocm\raytracing-8.2
 ```
 
 This allows users, scripts, and build systems to either target and latest installed release or pin to a major line while still preserving independently versioned install roots.
