@@ -286,3 +286,88 @@ Winget packages must:
 
 A top-level package identifier such as `AMD.ROCm` may be used for the primary Windows SDK experience. Additional componentized identifiers may be introduced if needed, but must remain aligned with the same package boundaries defined by this RFC.
 
+### Python Pip Requirements
+
+Python packages serve Python-first developer workflows and environment-scoped distribution scenarios.
+Windows pip packages must satisfy the following requirements:
+
+- Be environment-scoped and must not modify system-wide registry keys
+- Must not modify system or user `PATH` outside the active Python environment
+- Must not set or mutate `ROCM_PATH`
+- Use consistent naming aligned with ROCm release versioning
+- Support standard Windows Python packaging semantics including virtual environments
+- Support offline installation from mirrored package sources
+
+Pip packages may include:
+
+- Python bindings
+- Python developer tooling
+- Console entry points installed into the Python environment
+- Narrowly scoped runtime components needed for Python-first workflows
+
+Heavy native runtime delivery and general-purpose Windows SDK installation must remain centered on MSI and ZIP packaging.
+
+### ZIP Package Requirements
+
+ZIP packages must provide a portable file-tree representation of a Windows ROCm installation.
+
+ZIP archive layout must match the labelled directory layout:
+
+```
+rocm-core-X.Y.Z.zip
+  rocm-core-X.Y\bin\...
+```
+
+ZIP packages:
+
+- Must not modify environment variables
+- Must not modify `PATH`
+- Must not create registry entries
+- Must remain suitable for CI, offline deployment, and advanced users
+
+Tools and scripts inside ZIP packages should function correctly when the extracted directory is used directly as an SDK root.
+
+### Logging Requirements
+
+Windows installers must provide detailed logging for installation, upgrade, repair, uninstall, and cleanup actions.
+
+Installer logs must include, at minimum:
+
+- Installation path selection
+- Exisiting-version detection
+- Version comparison result
+- Environment-variable updates
+- Registry writes and removals
+- Legacy runtime cleanup actions when applicable
+- Reboot scheduling if cleanup of locked files requires deffered removal
+
+Example:
+
+```
+msiexec /i amdrocm-core-sdk.msi /l*vx install.log
+```
+
+### Security and Signing Requirements
+
+All Windows ROCm distribution artifacts must follow AMD signing and transport requirements.
+
+- MSI installers must be digitally signed by AMD
+- AMD-hosted package endpoints must use HTTPS
+- Winget manifests must include hash validation
+- Python package and ZIP archives should be published with metadata, reproducibility, and integrity verification
+
+### Redistribution Requirements
+
+Windows packaging must support a clear redistribution story for ISVs without requiring every end user to install a full development SDK.
+The supported redistrobution models are:
+
+1. **Application-local bundled runtime files** for supported runtime subsets
+1. **Environment-scoped pip packages** for Python-first workflows
+1. **Optional runtime-orianted MSI or winget install path** for customers who prefer a system-installed runtime
+
+Redistrobution documentation must clearly distringuish:
+
+- Development SDK installation
+- Runtime-only installation
+- Application-local redistrobution
+- Python environment-scoped installation
