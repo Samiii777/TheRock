@@ -105,6 +105,8 @@ All new Windows ROCm runtime components must be installed into the package insta
 - `PATH` entries associated with the selected ROCm installation
 - Registry-based SDK discovery
 - Environment-variable-based SDK discovery
+- `ROCM_PATH` environment variable must point to the latest ROCm release
+-  Downloaded ROCM zip files should point ROCM_PATH to its location.
 
 New installations must not place core ROCm runtime DLLs into `System32`. Legacy driver-installed runtime DLLs in `System32` that conflict with the new Windows packaging model must be detected and handled by the appropriate runtime installer. At a minimum, the Windows runtime package must handle cleanup of legacy `amdhip64` and `amd_comgr` placements when present, while preserving installer robustness if files are locked or permissions are insufficient.
 
