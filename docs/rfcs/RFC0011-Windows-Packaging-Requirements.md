@@ -224,7 +224,7 @@ After successful installation, Windows installers must publish a stable discover
 
 At minimum:
 
-- `ROCM_PATH` must point to the installation root of the most recently installed active ROCm version
+- `ROCM_PATH` must point to the installation root of the latest installed and active ROCm version
 - The selected installation's `bin` directory must be prepended to the relevant `PATH`
 - Duplicate `PATH` entries must not be introduced across reinstalls or upgrades
 - Per-machine installs must modify machine-scoped enrionment variables
