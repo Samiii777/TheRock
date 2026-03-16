@@ -288,6 +288,18 @@ Winget packages must:
 
 A top-level package identifier such as `AMD.ROCm` may be used for the primary Windows SDK experience. Additional componentized identifiers may be introduced if needed, but must remain aligned with the same package boundaries defined by this RFC.
 
+### Visual Studio Code Plugin Requirements
+
+A Visual Studio plugin must for ROCm must support deterministic discovery of the ROCm toolchain and assiociated build binaries on Windows. The plugin must support two binding modes:
+
+**Bind built binaries with latest**
+The plugin resolves the SDK/toolchain root from an environment variable, in this case `ROCM_PATH`. This allows projects to automatically build against the most recently installed ROCm version.
+
+**Bind fixed version using registry keys**
+The plugin resolves the SDK/toolchain root from a version-specific installation record (e.g., Windows registry or installer metadata). This allows projects to bind to a specific ROCm version for reproducible builds and CI environments.
+
+The plugin must clearly indicate the resolved SDK path and version used for the build.
+
 ### Python Pip Requirements
 
 Python packages serve Python-first developer workflows and environment-scoped distribution scenarios.
