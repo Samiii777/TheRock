@@ -114,7 +114,7 @@ New installations must not place core ROCm runtime DLLs into `System32`. Legacy 
 
 Windows package naming should remain aligned with the Linux TheRock naming model where practical so that users can reason about package purpose consistently across operating systems.
 
-The `amdrocm-` naming prefix should be used for AMD-published Windows package componens where a package-level identity is exposed directly to users.
+The `amdrocm-` naming prefix is used for AMD-published Windows package components where a package-level identity is exposed directly to users.
 
 Examples inlcude:
 
@@ -125,21 +125,30 @@ Examples inlcude:
 - `amdrocm-core-sdk`
 - `amdrocm-raytracing`
 
+| File Name               | Friendly Name-------------- | Contents | Description |
+| :---------------------- | :-------------------------- | :------- | :---------- |
+| amdrocm-runtimes        | ROCm Runtime Redistributable      |||
+| amdrocm-core            | ROCm Core Runtime Redistributable        |||
+| amdrocm-developer-tools | ROCm Core Developer Tools                |||
+| amdrocm-core-sdk        | ROCm Core SDK Redistributable            |||
+| amdrocm-raytracing      | ROCm Ray Tracing Runtime Redistributable |||
+| amdrocm-raytracing-sdk  | ROCm Ray Tracing SDK                     |||
+
 Winget package identifiers may use Windows ecosystem naming conventions such as `AMD.ROCm`, but they should map cleanly to the same product and component boundaries.
 
-### Package Granularity
+### Installer for ROCm on Windows
 
 Windows package granularity should follow the same general model as Linux: runtime and development responsibilities must be seperable, and developer tools must be independently installable.
 
 The following high-level package groupings must be avaialable:
 
-| Name                      | Content                                                                                            | Description |
-| :------------------------ | :------------------------------------------------------------------------------------------------- | :------------- |
-| `amdrocm-runtimes`        | HIP runtime, runtime compiler support, required runtime libraries                                  |                |
-| `amdrocm-core`            | Runtime components, core libraries, core utilities, discovery tools                                |                |
-| `amdrocm-core-dev`        | Headers, CMake config files, import libraries, static libraries, compiler-facing development files |                |
-| `amdrocm-developer-tools` | Debugging, profiling, diagnostics, and related developer tools                                     |                |
-| `amdrocm-core-sdk`        | Core runtime, development files, and developer tools                                               |                |
+| File Name                     | Content                                                                                            | Description    |
+| :---------------------------- | :------------------------------------------------------------------------------------------------- | :------------- |
+| `amdrocm-runtimes.msi`        | HIP runtime, runtime compiler support, required runtime libraries                                  |                |
+| `amdrocm-core.msi`            | Runtime components, core libraries, core utilities, discovery tools                                |                |
+| `amdrocm-core-dev.msi`        | Headers, CMake config files, import libraries, static libraries, compiler-facing development files |                |
+| `amdrocm-developer-tools.msi` | Debugging, profiling, diagnostics, and related developer tools                                     |                |
+| `amdrocm-core-sdk.msi`        | Core runtime, development files, and developer tools                                               |                |
 
 Windows package composition may evolve as TheRock matures, but the runtime vs. development vs. tools split must remain clear.
 
