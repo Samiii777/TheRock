@@ -95,7 +95,7 @@ C:\rocm\raytracing-8  ->  C:\rocm\raytracing-8.2
 
 This allows users, scripts, and build systems to either target and latest installed release or pin to a major line while still preserving independently versioned install roots.
 
-### DLL Search Order and Runtime Discovery
+### Decouple User Space from Adrenaline Driver
 
 Windows packages must avoid reliance on `C:\Windows\System32` for ROCm runtime discovery.
 
@@ -121,6 +121,7 @@ Examples inlcude:
 - `amdrocm-core-dev`
 - `amdrocm-developer-tools`
 - `amdrocm-core-sdk`
+- `amdrocm-raytracing`
 
 Winget package identifiers may use Windows ecosystem naming conventions such as `AMD.ROCm`, but they should map cleanly to the same product and component boundaries.
 
@@ -270,7 +271,7 @@ Windows ROCm packages must:
 - Avoid coupling SDK patch delivery to mandatory driver rebundling wherever possible
 - Provide install-time or first-run preflight checks that warn when the installed driver is outside the supported compatiblity range
 
-The Windows packaging contract must assume that the display driver and the ROCm SDK are seperate deliverables, even where an AMD driver may bundle or invole onstallation of a runtime-oriented package or compatibility purposes.
+The Windows packaging contract must assume that the display driver and the ROCm SDK are seperate deliverables, even where an AMD driver may bundle or involve installation of a runtime-oriented package or compatibility purposes. It should be noted that users are expected to self install the driver in accordance with this.
 
 ### Winget Requirements
 
