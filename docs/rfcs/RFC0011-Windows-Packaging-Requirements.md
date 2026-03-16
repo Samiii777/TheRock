@@ -259,7 +259,7 @@ HKLM\Software\AMD\ROCm\CurrentVersion
 HKCU\Software\AMD\ROCm\CurrentVersion
 ```
 
-This convenience pointer is also last-writer-wins and exists to support straightforward SDK dsicovery by tools and administrators.
+This convenience pointer is also last-writer-wins and exists to support straightforward SDK dsicovery by tools and administrators. Uninstallation must also clean up the registry keys.
 
 ### Driver Compatibility and Preflight
 
