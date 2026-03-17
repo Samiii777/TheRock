@@ -133,11 +133,16 @@ LongPathsEnabled = 1
 
 The redistributable installers include:
 
-| File name | Friendly name |
-| :-------- | :------------ |
-|||
-|||
-|||
+| File name                   | Friendly name                            |
+| :-------------------------- | :--------------------------------------- |
+| amdrocm-runtimes.msi        | ROCm Runtime Redistributable             |
+| amdrocm-core.msi            | ROCm Core Runtime Redistributable        |
+| amdrocm-developer-tools.msi | ROCm Core Developer Tools                |
+| amdrocm-core-sdk.msi        | ROCm Core SDK Redistributable            |
+| amdrocm-raytracing.msi      | ROCm Ray Tracing Runtime Redistributable |
+| amdrocm-raytracing-sdk.msi  | ROCm Ray Tracing SDK                     |
+
+The above redistributable installers are required to operate within the default `MAX_PATH` limit of 260 characters and will not require long path support to be enabled.
 
 ### Decouple User Space from Adrenaline Driver
 
@@ -160,14 +165,14 @@ Windows package naming should remain aligned with the Linux TheRock naming model
 
 The `amdrocm-` naming prefix is used for AMD-published Windows package components where a package-level identity is exposed directly to users.
 
-| File Name               | Friendly Name               | Contents | Description |
-| :---------------------- | :-------------------------- | :------- | :---------- |
-| amdrocm-runtimes        | ROCm Runtime Redistributable      |||
-| amdrocm-core            | ROCm Core Runtime Redistributable        |||
-| amdrocm-developer-tools | ROCm Core Developer Tools                |||
-| amdrocm-core-sdk        | ROCm Core SDK Redistributable            |||
-| amdrocm-raytracing      | ROCm Ray Tracing Runtime Redistributable |||
-| amdrocm-raytracing-sdk  | ROCm Ray Tracing SDK                     |||
+| File Name               | Friendly Name                            | Contents                                                                                              | Description                                 |
+| :---------------------- | :--------------------------------------- | :---------------------------------------------------------------------------------------------------- | :------------------------------------------ |
+| amdrocm-runtimes        | ROCm Runtime Redistributable             | HIP runtime, runtime compiler support, required runtime libraires                                     | Run pre-built ROCm projects                 |
+| amdrocm-core            | ROCm Core Runtime Redistributable        | Core runtime components, core libraries, utilities, device discovery tools                            | Run ROCm projects                           |
+| amdrocm-developer-tools | ROCm Core Developer Tools                | Debuggers, profilers, tracing tools, diagnostics, performance analysis tools                          | Debug and optimize ROCm projects            |
+| amdrocm-core-sdk        | ROCm Core SDK Redistributable            | Core runtime, development headers, CMake configs, libraries, and developer tools                      | Everything                                  |
+| amdrocm-raytracing      | ROCm Ray Tracing Runtime Redistributable | Ray tracing runtime libraries, acceleration structures, and GPU architecture-specific binaries | Run ROCm ray tracing workloads              |
+| amdrocm-raytracing-sdk  | ROCm Ray Tracing SDK                     | Ray tracing development headers, SDK libraries, samples, and tooling                                  | Develop and build ROCm ray tracing projects |
 
 Winget package identifiers may use Windows ecosystem naming conventions such as `AMD.ROCm`, but they should map cleanly to the same product and component boundaries.
 
@@ -177,13 +182,13 @@ Windows package granularity should follow the same general model as Linux: runti
 
 The following high-level package groupings must be avaialable:
 
-| File Name                     | Content                                                                                            | Description    |
-| :---------------------------- | :------------------------------------------------------------------------------------------------- | :------------- |
-| `amdrocm-runtimes.msi`        | HIP runtime, runtime compiler support, required runtime libraries                                  |                |
-| `amdrocm-core.msi`            | Runtime components, core libraries, core utilities, discovery tools                                |                |
-| `amdrocm-core-dev.msi`        | Headers, CMake config files, import libraries, static libraries, compiler-facing development files |                |
-| `amdrocm-developer-tools.msi` | Debugging, profiling, diagnostics, and related developer tools                                     |                |
-| `amdrocm-core-sdk.msi`        | Core runtime, development files, and developer tools                                               |                |
+| File Name                     | Content                                                                                            | Description                       |
+| :---------------------------- | :------------------------------------------------------------------------------------------------- | :-------------------------------- |
+| `amdrocm-runtimes.msi`        | HIP runtime, runtime compiler support, required runtime libraries                                  |  Run pre-built ROCm projects      |
+| `amdrocm-core.msi`            | Runtime components, core libraries, core utilities, discovery tools                                |  Run ROCm projects                |
+| `amdrocm-core-dev.msi`        | Headers, CMake config files, import libraries, static libraries, compiler-facing development files | Build ROCm projects               |
+| `amdrocm-developer-tools.msi` | Debugging, profiling, diagnostics, and related developer tools                                     | Debug and optimize ROCm projects |
+| `amdrocm-core-sdk.msi`        | Core runtime, development files, and developer tools                                               | Everything                        |
 
 Windows package composition may evolve as TheRock matures, but the runtime vs. development vs. tools split must remain clear.
 
@@ -229,19 +234,34 @@ msiexec /famus amdrocm-core-sdk.msi /quiet
 
 MSI installers should be GUI-less or minimal-UI by default and must support unattended enterprise deployment.
 
+### Device-Specific Architecture Packages
+
+Users are encouraged to identify their local GPU architecture and install packages exclusive to the GPU architectures present. Otherwise, users can install a complete ROCm installation with all GPU architectures to enable all GPUs. 
+
+The following two installer options will be available:
+
+1. **General Installer**: Install packages for all supported architectures.
+1. **Architecture Specific Installer**: Install packages for a specific GPU architecture family (e.g., gfx-110x)
+
+All device-specific packages must:
+
+- Not conflict with each other
+- Be independently installable
+- Support meta-packages
+
 ### Installation Logic and Version Handling
 
 Upon execution, MSI packages must inspect the installation target and apply deterministic version-handling rules.
 
 The following behavior matrix must be supported:
 
-| Scenario                                                 | Behavior                                                                                           |
-| :------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
-| No ROCm installation at target path                      | Installs normally                                                                                  |
-| Older version detected at the same target path           | Perform in-place upgrade                                                                         |
-| Same version detected at the same target path            | Return success with no action, unless an explicit repair or reinstall mode is requested |
-| Newer version detected at the same target path           | Abort with error and instruct the user to uninstall or choose a different path                   |
-Different major.minor version detected at a different path | Allow side-by-side installation                                                                    |
+| Scenario                                                   | Behavior                                                                                           |
+| :--------------------------------------------------------- | :------------------------------------------------------------------------------------------------- |
+| No ROCm installation at target path                        | Installs normally                                                                                  |
+| Older version detected at the same target path             | Perform in-place upgrade                                                                           |
+| Same version detected at the same target path              | Return success with no action, unless an explicit repair or reinstall mode is requested            |
+| Newer version detected at the same target path             | Abort with error and instruct the user to uninstall or choose a different path                     |
+| Different major.minor version detected at a different path | Allow side-by-side installation                                                                    |
 
 Path versions must upgrade in place within the same `X.Y` installation root.
 
