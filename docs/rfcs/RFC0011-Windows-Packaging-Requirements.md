@@ -63,7 +63,7 @@ MSI packages are the authoritative Windows installation unit. Winget, pip, and Z
 The ROCm Core SDK on Windows must be installed under a versioned installation root to support side-by-side installation of major.minor releases.
 
 ```
-C:\rocm\core-X.Y
+C:\Program Files\AMD\rocm\core-X.Y
 ```
 
 Where:
@@ -76,7 +76,7 @@ Where:
 The installed directory structure must mirror the cross-platform ROCm layout as closely as practical:
 
 ```
-C:\rocm\core-X.Y\
+C:\Program Files\AMD\rocm\core-X.Y\
   bin\
   lib\
   include\
@@ -85,15 +85,59 @@ C:\rocm\core-X.Y\
   version.txt
 ```
 
-A convenience path to the most recently installed version should be maintained when practical:
+A convenience path to the most recently installed version will be maintained when practical:
 
 ```
-C:\rocm\core  ->  C:\rocm\core-8.2
-C:\rocm\core-8  ->  C:\rocm\core-8.2
-C:\rocm\raytracing-8  ->  C:\rocm\raytracing-8.2
+C:\Program Files\AMD\rocm\core  ->  C:\Program Files\AMD\rocm\core-8.2
+C:\Program Files\AMD\rocm\core-8  ->  C:\Program Files\AMD\rocm\core-8.2
+C:\Program Files\AMD\rocm\raytracing-8  ->  C:\Program Files\AMD\rocm\raytracing-8.2
 ```
 
-This allows users, scripts, and build systems to either target and latest installed release or pin to a major line while still preserving independently versioned install roots.
+This allows users, scripts, and build systems to either target and latest installed release or pin to a major line while still preserving independently versioned install roots. On Windows, symbolic links require that the user has administrative provleges or Windows Developer Mode is enabled. This is not guaranteed in enterprise systems, CI environments, and customer deployments. Due to this, symlinks will not be required for the correct operation of ROCm and will be provided as an optional convenience feature only.
+
+Additionally, all Windows caches for FFT and other programs will be stored in the following location:
+
+```
+C:\Program Files\AMD\rocm\
+```
+
+Caches are stored system wide and matches Windows guidelines for application data.
+
+Example:
+
+```
+C:\Program Files\AMD\rocm\
+  cache\
+      fft\
+      rtc\
+      kernels\
+      tuning\
+      misc\
+```
+
+### Path Length Requirements
+
+Native Windows 10 and higher have the `MAX_PATH` environment variable set to 260 characters but can support up to a 32 thousand character path if the following two conditions are met:
+
+1. **The OS enabled the long paths option**: Computer Configuration -> Administrative Templates -> System -> Filesystem -> Enable Win32 long paths.
+1. **The program** must include the <longPathAware>true</longPathAware> XML tag.
+
+The enablement of long paths is required for registry key names involving the SDK files. This includes Cmake, headers, etc. and excludes the runtimes. All redistributable runtimes will support the default `MAX_PATH` length of 260 characters.
+
+The installer should have an option to enable:
+
+```
+HKLM\SYSTEM\CurrentControlSet\Control\FileSystem
+LongPathsEnabled = 1
+```
+
+The redistributable installers include:
+
+| File name | Friendly name |
+| :-------- | :------------ |
+|||
+|||
+|||
 
 ### Decouple User Space from Adrenaline Driver
 
@@ -116,16 +160,7 @@ Windows package naming should remain aligned with the Linux TheRock naming model
 
 The `amdrocm-` naming prefix is used for AMD-published Windows package components where a package-level identity is exposed directly to users.
 
-Examples inlcude:
-
-- `amdrocm-runtimes`
-- `amdrocm-core`
-- `amdrocm-core-dev`
-- `amdrocm-developer-tools`
-- `amdrocm-core-sdk`
-- `amdrocm-raytracing`
-
-| File Name               | Friendly Name-------------- | Contents | Description |
+| File Name               | Friendly Name               | Contents | Description |
 | :---------------------- | :-------------------------- | :------- | :---------- |
 | amdrocm-runtimes        | ROCm Runtime Redistributable      |||
 | amdrocm-core            | ROCm Core Runtime Redistributable        |||
@@ -151,6 +186,10 @@ The following high-level package groupings must be avaialable:
 | `amdrocm-core-sdk.msi`        | Core runtime, development files, and developer tools                                               |                |
 
 Windows package composition may evolve as TheRock matures, but the runtime vs. development vs. tools split must remain clear.
+
+### ROCm Installer Branding 
+
+All installers will have proper ROCm and AMD branding. This includes the ROCm logo and the AMD logo that will be included on the installers GUI.
 
 ### Installation Configurations
 
@@ -243,7 +282,7 @@ The convenience variable `ROCM_PATH` is last-writer-wins. Build systems and appl
 
 ### Registry Requirements
 
-To support discovery and side-by-side versioning, Windows ROCm installers must create versioned registry keys.
+To support discovery and side-by-side versioning, Windows ROCm installers must create versioned registry keys. It should also be noted that registry key locations are system wide, not per user.
 
 Per-machine installs:
 
