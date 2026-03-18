@@ -413,7 +413,7 @@ Tools and scripts inside ZIP packages should function correctly when the extract
 
 ### Logging Requirements
 
-Windows installers must provide detailed logging for installation, upgrade, repair, uninstall, and cleanup actions.
+Windows installers will provide detailed logging for installation, upgrade, repair, uninstall, and cleanup actions.
 
 Installer logs must include, at minimum:
 
@@ -424,6 +424,13 @@ Installer logs must include, at minimum:
 - Registry writes and removals
 - Legacy runtime cleanup actions when applicable
 - Reboot scheduling if cleanup of locked files requires deffered removal
+
+Installers should also document:
+
+- Publication location
+- Download instructions
+- Log file location and retrieval steps
+- Any additional troubleshooting or diagnostic guidance
 
 Example:
 
