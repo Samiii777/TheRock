@@ -76,7 +76,7 @@ Where:
 The installed directory structure must mirror the cross-platform ROCm layout as closely as practical:
 
 ```
-C:\Program Files\AMD\rocm\core-X.Y\
+C:\Program Files\AMD\ROCm\Core-X.Y\
   bin\
   lib\
   include\
