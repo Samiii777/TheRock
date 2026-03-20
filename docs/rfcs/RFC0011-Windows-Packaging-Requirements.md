@@ -63,7 +63,7 @@ MSI packages are the authoritative Windows installation unit. Winget, pip, and Z
 The ROCm Core SDK on Windows must be installed under a versioned installation root to support side-by-side installation of major.minor releases.
 
 ```
-C:\Program Files\AMD\rocm\core-X.Y
+C:\Program Files\AMD\ROCm\Core-X.Y
 ```
 
 Where:
@@ -88,9 +88,9 @@ C:\Program Files\AMD\ROCm\Core-X.Y\
 A convenience path to the most recently installed version will be maintained when practical:
 
 ```
-C:\Program Files\AMD\rocm\core  ->  C:\Program Files\AMD\rocm\core-8.2
-C:\Program Files\AMD\rocm\core-8  ->  C:\Program Files\AMD\rocm\core-8.2
-C:\Program Files\AMD\rocm\raytracing-8  ->  C:\Program Files\AMD\rocm\raytracing-8.2
+C:\Program Files\AMD\ROCm\Core  ->  C:\Program Files\AMD\ROCm\Core-8.2
+C:\Program Files\AMD\ROCm\Core-8  ->  C:\Program Files\AMD\ROCm\Core-8.2
+C:\Program Files\AMD\ROCm\raytracing-8  ->  C:\Program Files\AMD\ROCm\raytracing-8.2
 ```
 
 This allows users, scripts, and build systems to either target and latest installed release or pin to a major line while still preserving independently versioned install roots. On Windows, symbolic links require that the user has administrative provleges or Windows Developer Mode is enabled. This is not guaranteed in enterprise systems, CI environments, and customer deployments. Due to this, symlinks will not be required for the correct operation of ROCm and will be provided as an optional convenience feature only.
@@ -98,7 +98,7 @@ This allows users, scripts, and build systems to either target and latest instal
 Additionally, all Windows caches for FFT and other programs will be stored in the following location:
 
 ```
-C:\Program Files\AMD\rocm\
+C:\Program Files\AMD\ROCm\
 ```
 
 Caches are stored system wide and matches Windows guidelines for application data.
@@ -106,7 +106,7 @@ Caches are stored system wide and matches Windows guidelines for application dat
 Example:
 
 ```
-C:\Program Files\AMD\rocm\
+C:\Program Files\AMD\ROCm\
   cache\
       fft\
       rtc\
@@ -331,7 +331,7 @@ HKCU\Software\AMD\ROCm\CurrentVersion
 
 This convenience pointer is also last-writer-wins and exists to support straightforward SDK dsicovery by tools and administrators. Uninstallation must also clean up the registry keys.
 
-### Driver Compatibility and Preflight
+### Driver Compatibility
 
 Driver packaging is out of scope for this RFC, but Windows SDK packaging must be designed around an explicit driver compatibility contract.
 
