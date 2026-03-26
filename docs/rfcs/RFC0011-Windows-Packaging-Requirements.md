@@ -7,11 +7,11 @@ status: draft
 
 # TheRock Windows Packaging Requirements
 
-With the implementation of TheRock build system, native Windows packaging and installation requirements must be defined to complement the Linux software packaging requirements. This RFC defines the packaging, installation, upgrade, uninstallation, versioning, and distrobuition requirements for TheRock software on native Windows, including the ROCm Core SDK and related ROCm software components.
+With the implementation of TheRock build system, native Windows packaging and installation requirements must be defined to complement the Linux software packaging requirements. This RFC defines the packaging, installation, upgrade, uninstallation, versioning, and distribution requirements for TheRock software on native Windows, including the ROCm Core SDK and related ROCm software components.
 
 Our goals are to:
 
-1. **Standardize packaging behaviour for native Windows ROCm sotware**
+1. **Standardize packaging behaviour for native Windows ROCm software**
 1. **Ensure predictable installation, upgrade, repair, side-by-side support, and uninstall behavior**
 1. **Provide redistributable-friendly Windows delivery mechanisms for developers, IT administrators, and ISVs**
 1. **Align Windows packaging structure with the broader TheRock cross-platform packaging model where practical**
@@ -54,7 +54,7 @@ The supported packaging formats are:
 - **MSI packages** as the primary OS-integrated installation unit
 - **Winget packages** as Windows package-manger-facing meta packages or installers that reference AMD-hosted MSI artifacts
 - **Python pip packages** for Python bindings, Python-first tooling, and environment-scoped developer workflows
-- **ZIP archives** for portable, offline, CI, ir power-user scenarios
+- **ZIP archives** for portable, offline, CI, or power-user scenarios
 
 MSI packages are the authoritative Windows installation unit. Winget, pip, and ZIP deliverables must complement MSI behavior rather than redefine the core packaging contract.
 
@@ -93,12 +93,12 @@ C:\Program Files\AMD\ROCm\Core-8  ->  C:\Program Files\AMD\ROCm\Core-8.2
 C:\Program Files\AMD\ROCm\raytracing-8  ->  C:\Program Files\AMD\ROCm\raytracing-8.2
 ```
 
-This allows users, scripts, and build systems to either target and latest installed release or pin to a major line while still preserving independently versioned install roots. On Windows, symbolic links require that the user has administrative provleges or Windows Developer Mode is enabled. This is not guaranteed in enterprise systems, CI environments, and customer deployments. Due to this, symlinks will not be required for the correct operation of ROCm and will be provided as an optional convenience feature only.
+This allows users, scripts, and build systems to either target and latest installed release or pin to a major line while still preserving independently versioned install roots. On Windows, symbolic links require that the user has administrative privileges or Windows Developer Mode is enabled. This is not guaranteed in enterprise systems, CI environments, and customer deployments. Due to this, symlinks will not be required for the correct operation of ROCm and will be provided as an optional convenience feature only.
 
 Additionally, all Windows caches for FFT and other programs will be stored in the following location:
 
 ```
-C:\Program Files\AMD\ROCm\
+C:\Program Data\AMD\ROCm\
 ```
 
 Caches are stored system wide and matches Windows guidelines for application data.
@@ -106,7 +106,7 @@ Caches are stored system wide and matches Windows guidelines for application dat
 Example:
 
 ```
-C:\Program Files\AMD\ROCm\
+C:\Program Data\AMD\ROCm\
   cache\
       fft\
       rtc\
@@ -122,7 +122,7 @@ Native Windows 10 and higher have the `MAX_PATH` environment variable set to 260
 1. **The OS enabled the long paths option**: Computer Configuration -> Administrative Templates -> System -> Filesystem -> Enable Win32 long paths.
 1. **The program** must include the <longPathAware>true</longPathAware> XML tag.
 
-The enablement of long paths is required for registry key names involving the SDK files. This includes Cmake, headers, etc. and excludes the runtimes. All redistributable runtimes will support the default `MAX_PATH` length of 260 characters.
+The enablement of long paths is required for registry key names involving the SDK files. This includes CMake, headers, etc. and excludes the runtimes. All redistributable runtimes will support the default `MAX_PATH` length of 260 characters.
 
 The installer should have an option to enable:
 
@@ -165,30 +165,22 @@ Windows package naming should remain aligned with the Linux TheRock naming model
 
 The `amdrocm-` naming prefix is used for AMD-published Windows package components where a package-level identity is exposed directly to users.
 
-| File Name               | Friendly Name                            | Contents                                                                                              | Description                                 |
-| :---------------------- | :--------------------------------------- | :---------------------------------------------------------------------------------------------------- | :------------------------------------------ |
-| amdrocm-runtimes        | ROCm Runtime Redistributable             | HIP runtime, runtime compiler support, required runtime libraires                                     | Run pre-built ROCm projects                 |
-| amdrocm-core            | ROCm Core Runtime Redistributable        | Core runtime components, core libraries, utilities, device discovery tools                            | Run ROCm projects                           |
-| amdrocm-developer-tools | ROCm Core Developer Tools                | Debuggers, profilers, tracing tools, diagnostics, performance analysis tools                          | Debug and optimize ROCm projects            |
-| amdrocm-core-sdk        | ROCm Core SDK Redistributable            | Core runtime, development headers, CMake configs, libraries, and developer tools                      | Everything                                  |
-| amdrocm-raytracing      | ROCm Ray Tracing Runtime Redistributable | Ray tracing runtime libraries, acceleration structures, and GPU architecture-specific binaries | Run ROCm ray tracing workloads              |
-| amdrocm-raytracing-sdk  | ROCm Ray Tracing SDK                     | Ray tracing development headers, SDK libraries, samples, and tooling                                  | Develop and build ROCm ray tracing projects |
+| File Name                     | Friendly Name                            | Contents                                                                                              | Description                                 |
+| :---------------------------- | :--------------------------------------- | :---------------------------------------------------------------------------------------------------- | :------------------------------------------ |
+| `amdrocm-runtimes.msi`        | ROCm Runtime Redistributable             | HIP runtime, runtime compiler support, required runtime libraries                                     | Run pre-built ROCm projects                 |
+| `amdrocm-core.msi`            | ROCm Core Runtime Redistributable        | Core runtime components, core libraries, utilities, device discovery tools                            | Run ROCm projects                           |
+| `amdrocm-developer-tools.msi` | ROCm Core Developer Tools                | Debuggers, profilers, tracing tools, diagnostics, performance analysis tools                          | Debug and optimize ROCm projects            |
+| `amdrocm-core-sdk.msi`        | ROCm Core SDK Redistributable            | Core runtime, development headers, CMake configs, libraries, and developer tools                      | Everything                                  |
+| `amdrocm-raytracing.msi`      | ROCm Ray Tracing Runtime Redistributable | Ray tracing runtime libraries, acceleration structures, and GPU architecture-specific binaries        | Run ROCm ray tracing workloads              |
+| `amdrocm-raytracing-sdk.msi`  | ROCm Ray Tracing SDK                     | Ray tracing development headers, SDK libraries, samples, and tooling                                  | Develop and build ROCm ray tracing projects |
 
 Winget package identifiers may use Windows ecosystem naming conventions such as `AMD.ROCm`, but they should map cleanly to the same product and component boundaries.
 
 ### Installer for ROCm on Windows
 
-Windows package granularity should follow the same general model as Linux: runtime and development responsibilities must be seperable, and developer tools must be independently installable.
+Windows package granularity should follow the same general model as Linux: runtime and development responsibilities must be separable, and developer tools must be independently installable.
 
-The following high-level package groupings must be avaialable:
-
-| File Name                     | Content                                                                                            | Description                       |
-| :---------------------------- | :------------------------------------------------------------------------------------------------- | :-------------------------------- |
-| `amdrocm-runtimes.msi`        | HIP runtime, runtime compiler support, required runtime libraries                                  |  Run pre-built ROCm projects      |
-| `amdrocm-core.msi`            | Runtime components, core libraries, core utilities, discovery tools                                |  Run ROCm projects                |
-| `amdrocm-core-dev.msi`        | Headers, CMake config files, import libraries, static libraries, compiler-facing development files | Build ROCm projects               |
-| `amdrocm-developer-tools.msi` | Debugging, profiling, diagnostics, and related developer tools                                     | Debug and optimize ROCm projects |
-| `amdrocm-core-sdk.msi`        | Core runtime, development files, and developer tools                                               | Everything                        |
+The high-level package groupings that must be available can be seen from the table above.
 
 Windows package composition may evolve as TheRock matures, but the runtime vs. development vs. tools split must remain clear.
 
@@ -203,7 +195,7 @@ Windows installation flows must support multiple install configurations aligned 
 At minimum, the following install configurations must be supported:
 
 - **Core SDK**: default developer installation
-- **Runtime Only**: minimal runtime footproint for executing prebuilt applications and redistribuition workflows
+- **Runtime Only**: minimal runtime footprint for executing prebuilt applications and redistribution workflows
 - **Developer Tools Only**: debugging, profiling, and diagnostics when runtime is already present
 - **Custom**: component-level selection for advanced users where supported by package dependency rules
 
@@ -249,6 +241,34 @@ All device-specific packages must:
 - Be independently installable
 - Support meta-packages
 
+Additionally device specific installation must support the following use cases:
+
+1. **ISV installler invokes ROCm Runtime Core via winget**:
+
+Winget starts launcher
+Launcher automatically detects avaialble GPU architectures
+Runs installers for each GPU architecture (host installers and per device installers)
+
+2. **Software developer use case**:
+
+Downloads ROCm launcher
+Selects full SDK
+Launcher detects local GPUs
+Installs host and device msi files
+
+3. **Software developer full installation**:
+
+Downloads ROCm launcher
+Selects full SDK
+Selects ALL GPU architectures
+
+4. **Direct download from AMD website**:
+
+User wants to get ROCm Runtime and ROCm Core for gfx family
+Multiple msi files are downloaded for use case and gfx family
+
+It should also be noted that Windows installation should be published in `repo.amd.com/rocm/win/...`.
+
 ### Installation Logic and Version Handling
 
 Upon execution, MSI packages must inspect the installation target and apply deterministic version-handling rules.
@@ -283,20 +303,30 @@ Uninstall requirements:
 - Remove files owned by the installation being removed
 - Remove environment-variable updates owned by that installation if they still reference that installation
 - Remove registry entries created by that installation
-- Remove package-owend  `PATH` entries associated with that installation only
+- Remove package-owned  `PATH` entries associated with that installation only
 - Avoid impacting other installed ROCm major.minor versions
 
 ### Environment Variables
 
-After successful installation, Windows installers must publish a stable discovery mechanism for tools and build systems.
+After successful installation, Windows installers must publish a stable discovery mechanism for tools and build systems without introducing conflicts between multiple ROCm installations or non-standard deployments.
 
 At minimum:
 
-- `ROCM_PATH` must point to the installation root of the latest installed and active ROCm version
-- The selected installation's `bin` directory must be prepended to the relevant `PATH`
-- Duplicate `PATH` entries must not be introduced across reinstalls or upgrades
-- Per-machine installs must modify machine-scoped enrionment variables
+- `ROCM_PATH` may point to the installation root of the latest installed and active ROCm version, but must be treatd as a convenience variable only, not a guaranteed or authoritative source of truth
+- The selected installation's `bin` directory msy be prepended to the relevant `PATH`, provided:
+    - Duplicate `PATH` entries are not introduced across reinstalls or upgrades
+    - Existing user or system configuration is not overridden in a way that breaks other ROCm installations or development environments
+- Per-machine installs must modify machine-scoped environment variables
 - Per-user installs must modify user-scoped environment variables only
+
+The following constraints apply:
+
+- Tools and libraries withiin the same ROcm isntallation must be able to discover one another without relying on global environment variables such as `ROCM_PATH`
+- Applications and build systems must not assume a fixed installation path, as ROCm may be installed in custom directories, build trees, or distributed via package managers such as Python wheels
+- Build systems and applications that require deterministic selection of a specific ROCm version should rely on:
+    - Versioned installation directories
+    - Explicit configuration (e.g., CMake/toolchain files)
+    - Registry-based discovery where applicable
 
 The convenience variable `ROCM_PATH` is last-writer-wins. Build systems and applications that require deterministic selection of a specific version should rely on versioned install paths and registry-based discovery rather than assuming `ROCM_PATH` is pinned permanently.
 
@@ -329,7 +359,7 @@ HKLM\Software\AMD\ROCm\CurrentVersion
 HKCU\Software\AMD\ROCm\CurrentVersion
 ```
 
-This convenience pointer is also last-writer-wins and exists to support straightforward SDK dsicovery by tools and administrators. Uninstallation must also clean up the registry keys.
+This convenience pointer is also last-writer-wins and exists to support straightforward SDK discovery by tools and administrators. Uninstallation must also clean up the registry keys.
 
 ### Driver Compatibility
 
@@ -339,9 +369,9 @@ Windows ROCm packages must:
 
 - Publish a compatibility matrix describing supported driver ranges for each ROCm release line
 - Avoid coupling SDK patch delivery to mandatory driver rebundling wherever possible
-- Provide install-time or first-run preflight checks that warn when the installed driver is outside the supported compatiblity range
+- Provide install-time or first-run preflight checks that warn when the installed driver is outside the supported compatibility range
 
-The Windows packaging contract must assume that the display driver and the ROCm SDK are seperate deliverables, even where an AMD driver may bundle or involve installation of a runtime-oriented package or compatibility purposes. It should be noted that users are expected to self install the driver in accordance with this.
+The Windows packaging contract must assume that the display driver and the ROCm SDK are separate deliverables, even where an AMD driver may bundle or involve installation of a runtime-oriented package or compatibility purposes. It should be noted that users are expected to self install the driver in accordance with this.
 
 ### Winget Requirements
 
@@ -360,7 +390,7 @@ A top-level package identifier such as `AMD.ROCm` may be used for the primary Wi
 
 ### Visual Studio Code Plugin Requirements
 
-A Visual Studio plugin must for ROCm must support deterministic discovery of the ROCm toolchain and assiociated build binaries on Windows. The plugin must support two binding modes:
+A Visual Studio plugin must for ROCm must support deterministic discovery of the ROCm toolchain and associated build binaries on Windows. The plugin must support two binding modes:
 
 **Bind built binaries with latest**
 The plugin resolves the SDK/toolchain root from an environment variable, in this case `ROCM_PATH`. This allows projects to automatically build against the most recently installed ROCm version.
@@ -418,12 +448,12 @@ Windows installers will provide detailed logging for installation, upgrade, repa
 Installer logs must include, at minimum:
 
 - Installation path selection
-- Exisiting-version detection
+- Existing-version detection
 - Version comparison result
 - Environment-variable updates
 - Registry writes and removals
 - Legacy runtime cleanup actions when applicable
-- Reboot scheduling if cleanup of locked files requires deffered removal
+- Reboot scheduling if cleanup of locked files requires deferred removal
 
 Installers should also document:
 
@@ -450,15 +480,15 @@ All Windows ROCm distribution artifacts must follow AMD signing and transport re
 ### Redistribution Requirements
 
 Windows packaging must support a clear redistribution story for ISVs without requiring every end user to install a full development SDK.
-The supported redistrobution models are:
+The supported redistribution models are:
 
 1. **Application-local bundled runtime files** for supported runtime subsets
 1. **Environment-scoped pip packages** for Python-first workflows
 1. **Optional runtime-orianted MSI or winget install path** for customers who prefer a system-installed runtime
 
-Redistrobution documentation must clearly distringuish:
+Redistribution documentation must clearly distinguish:
 
 - Development SDK installation
 - Runtime-only installation
-- Application-local redistrobution
+- Application-local redistribution
 - Python environment-scoped installation
