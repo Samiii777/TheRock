@@ -400,47 +400,6 @@ The plugin resolves the SDK/toolchain root from a version-specific installation 
 
 The plugin must clearly indicate the resolved SDK path and version used for the build.
 
-### Python Pip Requirements
-
-Python packages serve Python-first developer workflows and environment-scoped distribution scenarios.
-Windows pip packages must satisfy the following requirements:
-
-- Be environment-scoped and must not modify system-wide registry keys
-- Must not modify system or user `PATH` outside the active Python environment
-- Must not set or mutate `ROCM_PATH`
-- Use consistent naming aligned with ROCm release versioning
-- Support standard Windows Python packaging semantics including virtual environments
-- Support offline installation from mirrored package sources
-
-Pip packages may include:
-
-- Python bindings
-- Python developer tooling
-- Console entry points installed into the Python environment
-- Narrowly scoped runtime components needed for Python-first workflows
-
-Heavy native runtime delivery and general-purpose Windows SDK installation must remain centered on MSI and ZIP packaging.
-
-### ZIP Package Requirements
-
-ZIP packages must provide a portable file-tree representation of a Windows ROCm installation.
-
-ZIP archive layout must match the labelled directory layout:
-
-```
-rocm-core-X.Y.Z.zip
-  rocm-core-X.Y\bin\...
-```
-
-ZIP packages:
-
-- Must not modify environment variables
-- Must not modify `PATH`
-- Must not create registry entries
-- Must remain suitable for CI, offline deployment, and advanced users
-
-Tools and scripts inside ZIP packages should function correctly when the extracted directory is used directly as an SDK root.
-
 ### Logging Requirements
 
 Windows installers will provide detailed logging for installation, upgrade, repair, uninstall, and cleanup actions.
