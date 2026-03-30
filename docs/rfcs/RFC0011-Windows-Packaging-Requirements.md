@@ -1,7 +1,7 @@
 ---
 author: Liam Berry (LiamfBerry), Saad Rahim (saadrahim)
 created: 2026-03-13
-modified: 2026-03-13
+modified: 2026-03-30
 status: draft
 ---
 
@@ -24,8 +24,6 @@ Our goals are to:
 - Native Windows packaging requirements from ROCm software build with TheRock
 - MSI-based package requirements
 - Winget package and meta-package requirements
-- Python pip package requirements for Windows developer workflows
-- Portable ZIP package requirements
 - Runtime, development, and developer-tools package separation
 - Installation directory layout and package granularity
 - Side-by-side installation policy for major.minor versions
@@ -42,6 +40,8 @@ Our goals are to:
 - Full feature parity planning for every ROCm component on Day 1
 - Legacy HIP SDK packaging behavior except where migration handling is required
 - Microsoft Store-specific package requirements
+- Python pip package requirements for Windows developer workflows
+- Portable ZIP package requirements
 
 ## Windows Packaging Requirements
 
