@@ -53,10 +53,8 @@ The supported packaging formats are:
 
 - **MSI packages** as the primary OS-integrated installation unit
 - **Winget packages** as Windows package-manger-facing meta packages or installers that reference AMD-hosted MSI artifacts
-- **Python pip packages** for Python bindings, Python-first tooling, and environment-scoped developer workflows
-- **ZIP archives** for portable, offline, CI, or power-user scenarios
 
-MSI packages are the authoritative Windows installation unit. Winget, pip, and ZIP deliverables must complement MSI behavior rather than redefine the core packaging contract.
+Note that MSI packages are the authoritative Windows installation unit.
 
 ### Directory Layout
 
@@ -155,7 +153,6 @@ All new Windows ROCm runtime components must be installed into the package insta
 - Registry-based SDK discovery
 - Environment-variable-based SDK discovery
 - `ROCM_PATH` environment variable must point to the latest ROCm release
--  Downloaded ROCM zip files should point ROCM_PATH to its location.
 
 New installations must not place core ROCm runtime DLLs into `System32`. Legacy driver-installed runtime DLLs in `System32` that conflict with the new Windows packaging model must be detected and handled by the appropriate runtime installer. At a minimum, the Windows runtime package must handle cleanup of legacy `amdhip64` and `amd_comgr` placements when present, while preserving installer robustness if files are locked or permissions are insufficient.
 
@@ -434,7 +431,6 @@ All Windows ROCm distribution artifacts must follow AMD signing and transport re
 - MSI installers must be digitally signed by AMD
 - AMD-hosted package endpoints must use HTTPS
 - Winget manifests must include hash validation
-- Python package and ZIP archives should be published with metadata, reproducibility, and integrity verification
 
 ### Redistribution Requirements
 
@@ -442,7 +438,6 @@ Windows packaging must support a clear redistribution story for ISVs without req
 The supported redistribution models are:
 
 1. **Application-local bundled runtime files** for supported runtime subsets
-1. **Environment-scoped pip packages** for Python-first workflows
 1. **Optional runtime-orianted MSI or winget install path** for customers who prefer a system-installed runtime
 
 Redistribution documentation must clearly distinguish:
@@ -450,4 +445,3 @@ Redistribution documentation must clearly distinguish:
 - Development SDK installation
 - Runtime-only installation
 - Application-local redistribution
-- Python environment-scoped installation
