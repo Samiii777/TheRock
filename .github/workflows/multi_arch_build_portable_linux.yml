@@ -4,16 +4,15 @@
 # Multi-Arch Build - Sharded Pipeline for Linux
 #
 # This workflow builds TheRock in stages:
-# 1. foundation (generic) - sysdeps, base
-# 2. compiler-runtime (generic) - compiler, runtimes, profiler-core
-# 3. math-libs (per-arch) - BLAS, FFT, etc.
-# 4. comm-libs (per-arch) - RCCL, rocshmem (parallel to math-libs)
-# 5. debug-tools (generic) - amd-dbgapi, rocr-debug-agent, rocgdb (parallel to math-libs)
-# 6. dctools-core (generic) - RDC (parallel to math-libs)
-# 7. profiler-apps (generic) - rocprofiler-systems (parallel to math-libs)
-# 8. iree-compiler (generic) - IREE compiler (parallel to math-libs)
-# 9. fusilli-libs (generic) - Fusilli hipdnn provider (after math-libs + iree-compiler)
-# 10. media-libs (generic) - sysdeps-amd-mesa, rocdecode, rocjpeg
+# 1. compiler-runtime (generic) - sysdeps, base, compiler, runtimes, profiler-core
+# 2. math-libs (per-arch) - BLAS, FFT, etc.
+# 3. comm-libs (per-arch) - RCCL, rocshmem (parallel to math-libs)
+# 4. debug-tools (generic) - amd-dbgapi, rocr-debug-agent, rocgdb (parallel to math-libs)
+# 5. dctools-core (generic) - RDC (parallel to math-libs)
+# 6. profiler-apps (generic) - rocprofiler-systems (parallel to math-libs)
+# 7. iree-compiler (generic) - IREE compiler (parallel to math-libs)
+# 8. fusilli-libs (generic) - Fusilli hipdnn provider (after math-libs + iree-compiler)
+# 9. media-libs (generic) - sysdeps-amd-mesa, rocdecode, rocjpeg
 
 name: Multi-Arch Build (Linux)
 
@@ -53,27 +52,9 @@ permissions:
 
 jobs:
   # ==========================================================================
-  # STAGE: foundation (generic)
-  # ==========================================================================
-  foundation:
-    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'foundation') }}
-    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-    secrets: inherit
-    with:
-      stage_name: foundation
-      stage_display_name: "Stage - Foundation"
-      timeout_minutes: 180  # 3 hours
-      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-      rocm_package_version: ${{ inputs.rocm_package_version }}
-    permissions:
-      contents: read
-      id-token: write
-
-  # ==========================================================================
   # STAGE: compiler-runtime (generic)
   # ==========================================================================
   compiler-runtime:
-    needs: foundation
     if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'compiler-runtime') }}
     uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
     secrets: inherit

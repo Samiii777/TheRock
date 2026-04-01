@@ -130,13 +130,11 @@ disable_platforms = ["windows"]
 # These represent actual CI/CD pipeline jobs optimized for parallel execution
 # Note: Stage names are identifiers, not sequence indicators - many can run in parallel
 
-[build_stages.foundation]
-description = "Foundation - critical path dependencies"
-artifact_groups = ["third-party-sysdeps", "base"]
-
 [build_stages.compiler-runtime]
-description = "Compiler, runtimes, and core profiling"
+description = "Sysdeps, base, compiler, runtimes, and core profiling"
 artifact_groups = [
+    "third-party-sysdeps",
+    "base",
     "core-amdsmi",
     "core-runtime",
     "compiler",

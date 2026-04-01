@@ -4,9 +4,8 @@
 # Multi-Arch Build - Sharded Pipeline for Windows
 #
 # This workflow builds TheRock in stages:
-# 1. foundation (generic) - sysdeps, base
-# 2. compiler-runtime (generic) - compiler, runtimes
-# 3. math-libs (per-arch) - BLAS, FFT, etc.
+# 1. compiler-runtime (generic) - sysdeps, base, compiler, runtimes
+# 2. math-libs (per-arch) - BLAS, FFT, etc.
 #
 # Stages disabled on Windows: comm-libs, dctools-core, profiler-apps, media
 # (see BUILD_TOPOLOGY.toml disable_platforms)
@@ -48,28 +47,9 @@ permissions:
 
 jobs:
   # ==========================================================================
-  # STAGE: foundation (generic)
-  # ==========================================================================
-  foundation:
-    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'foundation') }}
-    uses: ./.github/workflows/multi_arch_build_windows_artifacts.yml
-    secrets: inherit
-    with:
-      stage_name: foundation
-      stage_display_name: "Stage - Foundation"
-      timeout_minutes: 180  # 3 hours
-      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-      rocm_package_version: ${{ inputs.rocm_package_version }}
-    permissions:
-      contents: read
-      id-token: write
-
-  # ==========================================================================
   # STAGE: compiler-runtime (generic)
   # ==========================================================================
   compiler-runtime:
-    needs: foundation
     if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'compiler-runtime') }}
     uses: ./.github/workflows/multi_arch_build_windows_artifacts.yml
     secrets: inherit
