@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: MIT
 
 set(_optional_offload_dep)
+set(_offload_lib_dir_arg)
 if(THEROCK_ENABLE_AMD_LLVM_OFFLOAD)
   set(_optional_offload_dep amd-llvm-offload)
+  get_target_property(_offload_dist amd-llvm-offload THEROCK_DIST_DIR)
+  set(_offload_lib_dir_arg "-DTHEROCK_OFFLOAD_LIB_DIR=${_offload_dist}/lib/llvm/lib")
 endif()
 
 if(THEROCK_ENABLE_ROCPROFV3)
@@ -290,6 +293,7 @@ if(THEROCK_ENABLE_ROCPROFV3)
         -DROCPROFSYS_GFX_TARGETS="${_ROCPROFSYS_GFX_TARGETS_ESCAPED}"
         -DROCPROFSYS_BUILD_SPDLOG=OFF
         "-DROCPROFSYS_USE_MPI=${THEROCK_ENABLE_MPI}"
+        ${_offload_lib_dir_arg}
       INSTALL_RPATH_DIRS
         "lib"
         "lib/rocprofiler-systems"

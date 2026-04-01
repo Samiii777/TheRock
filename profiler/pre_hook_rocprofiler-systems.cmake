@@ -6,6 +6,15 @@
 # config-file package only creates OpenMP::omp, so we shim the legacy
 # names after the provider resolves the find.
 
+# The project infers libomptarget's location from the compiler path, but
+# with the compiler split, clang and libomptarget live in different trees.
+# The super-project passes the offload lib dir so we can bootstrap the find.
+# TODO: Get the project to stop using heuristic find_library for libomptarget.
+if(THEROCK_OFFLOAD_LIB_DIR)
+  find_library(LIBOMPTARGET_SO NAMES omptarget
+    HINTS "${THEROCK_OFFLOAD_LIB_DIR}")
+endif()
+
 find_package(OpenMP CONFIG)
 if(TARGET OpenMP::omp AND NOT TARGET OpenMP::OpenMP_CXX)
   add_library(OpenMP::OpenMP_CXX INTERFACE IMPORTED)
