@@ -188,6 +188,7 @@ if(THEROCK_ENABLE_FLANG)
   therock_cmake_subproject_declare(amd-llvm-flang
     EXTERNAL_SOURCE_DIR "amd-llvm-flang"
     BINARY_DIR "amd-llvm-flang"
+    DISABLE_AMDGPU_TARGETS
     BACKGROUND_BUILD
     COMPILER_TOOLCHAIN amd-llvm
     CMAKE_ARGS
