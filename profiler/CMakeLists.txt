@@ -1,6 +1,11 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+set(_optional_offload_dep)
+if(THEROCK_ENABLE_AMD_LLVM_OFFLOAD)
+  set(_optional_offload_dep amd-llvm-offload)
+endif()
+
 if(THEROCK_ENABLE_ROCPROFV3)
   set(_openmpi_optional_dep)
   if(THEROCK_ENABLE_MPI)
@@ -303,6 +308,7 @@ if(THEROCK_ENABLE_ROCPROFV3)
         ${THEROCK_BUNDLED_LIBDRM}
         ${THEROCK_BUNDLED_SQLITE3}
         ${_openmpi_optional_dep}
+        ${_optional_offload_dep}
     )
     therock_cmake_subproject_glob_c_sources(rocprofiler-systems
       SUBDIRS .
