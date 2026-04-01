@@ -142,8 +142,11 @@ artifact_groups = [
     "hip-runtime",
     "opencl-runtime",
     "profiler-core",
-    "rocrtst"
 ]
+
+[build_stages.runtime-tests]
+description = "Runtime tests (parallel to math-libs, not on critical path)"
+artifact_groups = ["runtime-tests"]
 
 [build_stages.math-libs]
 description = "Math and ML libraries per architecture"
@@ -245,10 +248,10 @@ type = "generic"
 artifact_group_deps = ["core-runtime", "compiler"]
 source_sets = ["rocm-systems"]  # clr is in rocm-systems
 
-[artifact_groups.rocrtst]
-description = "Core runtime tests (ROCR-Runtime, rocminfo)"
+[artifact_groups.runtime-tests]
+description = "Runtime tests (hip-tests, rocrtst)"
 type = "generic"
-artifact_group_deps = ["opencl-runtime", "core-runtime"]
+artifact_group_deps = ["hip-runtime", "opencl-runtime", "core-runtime"]
 source_sets = ["rocm-systems"]
 
 [artifact_groups.math-libs]
@@ -527,7 +530,7 @@ feature_name = "OCL_RUNTIME"
 feature_group = "CORE"  # Part of core, enabled by default
 
 [artifacts.rocrtst]
-artifact_group = "rocrtst"
+artifact_group = "runtime-tests"
 type = "target-neutral"
 artifact_deps = ["core-runtime", "core-ocl", "sysdeps-hwloc"]
 feature_name = "CORE_RUNTIME_TESTS"
@@ -541,10 +544,8 @@ platform = "windows"
 artifact_deps = ["core-hip"]
 feature_group = "CORE"  # Part of core, enabled by default
 
-# --- hip-tests ---
-
 [artifacts.core-hiptests]
-artifact_group = "hip-runtime"
+artifact_group = "runtime-tests"
 type = "target-neutral"
 artifact_deps = ["core-hip"]
 feature_group = "CORE"  # Part of core, enabled by default

@@ -5,14 +5,15 @@
 #
 # This workflow builds TheRock in stages:
 # 1. compiler-runtime (generic) - sysdeps, base, compiler, runtimes, profiler-core
-# 2. math-libs (per-arch) - BLAS, FFT, etc.
-# 3. comm-libs (per-arch) - RCCL, rocshmem (parallel to math-libs)
-# 4. debug-tools (generic) - amd-dbgapi, rocr-debug-agent, rocgdb (parallel to math-libs)
-# 5. dctools-core (generic) - RDC (parallel to math-libs)
-# 6. profiler-apps (generic) - rocprofiler-systems (parallel to math-libs)
-# 7. iree-compiler (generic) - IREE compiler (parallel to math-libs)
-# 8. fusilli-libs (generic) - Fusilli hipdnn provider (after math-libs + iree-compiler)
-# 9. media-libs (generic) - sysdeps-amd-mesa, rocdecode, rocjpeg
+# 2. runtime-tests (generic) - hip-tests, rocrtst (parallel to math-libs)
+# 3. math-libs (per-arch) - BLAS, FFT, etc.
+# 4. comm-libs (per-arch) - RCCL, rocshmem (parallel to math-libs)
+# 5. debug-tools (generic) - amd-dbgapi, rocr-debug-agent, rocgdb (parallel to math-libs)
+# 6. dctools-core (generic) - RDC (parallel to math-libs)
+# 7. profiler-apps (generic) - rocprofiler-systems (parallel to math-libs)
+# 8. iree-compiler (generic) - IREE compiler (parallel to math-libs)
+# 9. fusilli-libs (generic) - Fusilli hipdnn provider (after math-libs + iree-compiler)
+# 10. media-libs (generic) - sysdeps-amd-mesa, rocdecode, rocjpeg
 
 name: Multi-Arch Build (Linux)
 
@@ -62,6 +63,24 @@ jobs:
       stage_name: compiler-runtime
       stage_display_name: "Stage - Compiler Runtime"
       timeout_minutes: 480  # 8 hours (compiler is big)
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+    permissions:
+      contents: read
+      id-token: write
+
+  # ==========================================================================
+  # STAGE: runtime-tests (generic, parallel to math-libs)
+  # ==========================================================================
+  runtime-tests:
+    needs: compiler-runtime
+    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'runtime-tests') }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: runtime-tests
+      stage_display_name: "Stage - Runtime Tests"
+      timeout_minutes: 120  # 2 hours
       dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
       rocm_package_version: ${{ inputs.rocm_package_version }}
     permissions:
