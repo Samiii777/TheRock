@@ -348,6 +348,8 @@ class JobDecisions:
     build_rocm_python: JobGroupDecision
     build_pytorch: JobGroupDecision
     test_pytorch: JobGroupDecision
+    build_jax: JobGroupDecision
+    test_jax: JobGroupDecision
 
     def log(self) -> None:
         """Log job decisions for CI diagnostics."""
@@ -361,6 +363,8 @@ class JobDecisions:
         print(f"  build_rocm_python: {self.build_rocm_python.action.value}")
         print(f"  build_pytorch: {self.build_pytorch.action.value}")
         print(f"  test_pytorch: {self.test_pytorch.action.value}")
+        print(f"  build_jax: {self.build_jax.action.value}")
+        print(f"  test_jax: {self.test_jax.action.value}")
 
 
 @dataclass(frozen=True)
@@ -574,12 +578,20 @@ def decide_jobs(
     # Other jobs run unconditionally with no configuration.
     # TODO: job pruning: skip pytorch if only JAX has been edited, etc.
 
+    enable_jax = ci_inputs.is_pull_request and "ci:build-jax" in ci_inputs.pr_labels
+
     return JobDecisions(
         build_rocm=build_rocm,
         test_rocm=test_rocm,
         build_rocm_python=JobGroupDecision(action=JobAction.RUN),
         build_pytorch=JobGroupDecision(action=JobAction.RUN),
         test_pytorch=JobGroupDecision(action=JobAction.RUN),
+        build_jax=JobGroupDecision(
+            action=JobAction.RUN if enable_jax else JobAction.SKIP
+        ),
+        test_jax=JobGroupDecision(
+            action=JobAction.RUN if enable_jax else JobAction.SKIP
+        ),
     )
 
 
