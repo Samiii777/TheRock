@@ -99,7 +99,7 @@ amdgpu_family_info_matrix_presubmit = {
             "sanity_check_only_for_family": True,
         },
         "windows": {
-            "test-runs-on": "windows-gfx110X-gpu-rocm",
+            "test-runs-on": "test_setup_windows_gpu_navi3x",
             "family": "gfx110X-all",
             "fetch-gfx-targets": ["gfx1100"],
             "bypass_tests_for_releases": True,
