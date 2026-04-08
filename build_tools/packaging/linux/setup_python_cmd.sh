@@ -1,7 +1,6 @@
 #!/bin/bash
-
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 # Resolve PYTHON_CMD from --os-profile and optionally install that runtime.
 #
