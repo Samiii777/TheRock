@@ -1,7 +1,6 @@
 #!/bin/bash
-
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 # Test suite for setup_python_cmd.sh
 # Run with: bash build_tools/packaging/linux/tests/setup_python_cmd_test.sh
