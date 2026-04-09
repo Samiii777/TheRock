@@ -114,7 +114,7 @@ jobs:
     runs-on: ${{ github.repository_owner == 'ROCm' && 'linux-gfx942-1gpu-ossci-rocm' || 'ubuntu-24.04' }}
     container:
       # Images by OS profile: sles* -> SUSE BCI 16; ubuntu*/debian* -> ubuntu:24.04; other rpm (non-SLES, e.g. rhel10) -> RHEL UBI 10.
-      image: ${{ startsWith(inputs.os_profile, 'sles') && 'registry.suse.com/bci/bci-base:16.0' || ((startsWith(inputs.os_profile, 'ubuntu') || startsWith(inputs.os_profile, 'debian')) && 'ubuntu:24.04') || 'registry.access.redhat.com/ubi10/ubi:latest' }}
+      image: ${{ startsWith(inputs.os_profile, 'sles') && 'registry.suse.com/bci/bci-base:16.0' || ((startsWith(inputs.os_profile, 'ubuntu') || startsWith(inputs.os_profile, 'debian')) && 'ubuntu:24.04') || 'registry.access.redhat.com/ubi10/ubi:10.1' }}
       options: --ipc host
         --privileged
     env:
