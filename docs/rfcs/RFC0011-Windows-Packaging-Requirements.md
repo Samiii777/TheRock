@@ -156,6 +156,12 @@ All new Windows ROCm runtime components must be installed into the package insta
 
 New installations must not place core ROCm runtime DLLs into `System32`. Legacy driver-installed runtime DLLs in `System32` that conflict with the new Windows packaging model must be detected and handled by the appropriate runtime installer. At a minimum, the Windows runtime package must handle cleanup of legacy `amdhip64` and `amd_comgr` placements when present, while preserving installer robustness if files are locked or permissions are insufficient.
 
+### OpenCL Changes
+
+OpenCL will laregely in part be sustained and no changes are expected to be implemented. Installing, upgrading, or uninstalling the ROCm SDK must have no effect on an OpenCL environment.
+
+Additionally, `amd_comgr_2.dll` will be renamed to `amd_comgr_opencl.dll` to better reflect its usecase and so that it can be shipped alongside the driver.
+
 ### Package Naming
 
 Windows package naming should remain aligned with the Linux TheRock naming model where practical so that users can reason about package purpose consistently across operating systems.
