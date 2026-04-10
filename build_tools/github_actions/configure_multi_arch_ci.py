@@ -20,7 +20,7 @@ The CI pipeline is a DAG of job groups:
 
     build-rocm → test-rocm
                → build-rocm-python → build-pytorch → test-pytorch
-                                   → build-jax     → test-jax (future)
+                                   → build-jax     → test-jax
                → build-native-linux   → test-native-linux   (future)
                → build-native-windows → test-native-windows (future)
 
@@ -247,6 +247,7 @@ class TargetSelection:
 #
 #   build-rocm ──> test-rocm
 #              └─> build-rocm-python ──> build-pytorch ──> test-pytorch
+#                                        build-jax     ──> test-jax
 #
 # Each node gets a JobAction: RUN, PREBUILT, or SKIP.
 #   - RUN:      Build from source (or run tests).
