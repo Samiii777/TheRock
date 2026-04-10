@@ -35,6 +35,7 @@ The following labels may be added to a pull request to modify CI behavior:
 
 | Label or group          | Description                                                                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci:build-jax`          | Enable JAX build/test job groups in multi-arch CI                                                                                         |
 | `ci:skip`               | Skip all builds and tests                                                                                                                 |
 | `ci:run-all-archs`      | Build and test all possible architectures                                                                                                 |
 | `ci:run-multi-arch`     | (DEPRECATED) Opt in to running multi-arch CI on this PR                                                                                   |
