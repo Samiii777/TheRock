@@ -455,6 +455,9 @@ jobs:
     name: Test ${{ matrix.pkg_type }} install - ${{ matrix.os_profile }}
     needs: [prepare_native_linux_package_install_tests, setup_metadata]
     if: ${{ github.repository_owner == 'ROCm' }}
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
