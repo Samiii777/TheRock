@@ -160,7 +160,7 @@ New installations must not place core ROCm runtime DLLs into `System32`. Legacy 
 
 OpenCL will laregely in part be sustained and no changes are expected to be implemented. Installing, upgrading, or uninstalling the ROCm SDK must have no effect on an OpenCL environment.
 
-Additionally, `amd_comgr_3.dll` will be renamed to `amd_comgr_opencl.dll` to better reflect its usecase and so that it can be shipped alongside the driver.
+Additionally, `amd_comgr_3.dll` will be renamed to `amd_comgr_opencl.dll` to better reflect its use case and so that it can be shipped alongside the driver version 26.30 in Q3.
 
 ### Package Naming
 
