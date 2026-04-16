@@ -91,185 +91,185 @@ jobs:
       contents: read
       id-token: write
 
-  # # ==========================================================================
-  # # STAGE: math-libs (per-arch)
-  # # ==========================================================================
-  # math-libs:
-  #   needs: compiler-runtime
-  #   if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'math-libs') }}
-  #   strategy:
-  #     # `fail-fast: false` lets all families complete even if one fails.
-  #     # This is useful for CI (to see all failures at once), but for releases
-  #     # this risks publishing incomplete packages. Release pipelines may want
-  #     # to either set `fail-fast: true` or add a validation step that blocks
-  #     # promotion unless all jobs succeeded.
-  #     fail-fast: false
-  #     matrix:
-  #       family_info: ${{ fromJSON(inputs.matrix_per_family_json) }}
-  #   uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-  #   secrets: inherit
-  #   with:
-  #     stage_name: math-libs
-  #     stage_display_name: "Stage - Math Libs (${{ matrix.family_info.amdgpu_family }})"
-  #     timeout_minutes: 480  # 8 hours
-  #     amdgpu_family: ${{ matrix.family_info.amdgpu_family }}
-  #     dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-  #     rocm_package_version: ${{ inputs.rocm_package_version }}
-  #     build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-  #     release_type: ${{ inputs.release_type }}
-  #   permissions:
-  #     contents: read
-  #     id-token: write
+  # ==========================================================================
+  # STAGE: math-libs (per-arch)
+  # ==========================================================================
+  math-libs:
+    needs: compiler-runtime
+    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'math-libs') }}
+    strategy:
+      # `fail-fast: false` lets all families complete even if one fails.
+      # This is useful for CI (to see all failures at once), but for releases
+      # this risks publishing incomplete packages. Release pipelines may want
+      # to either set `fail-fast: true` or add a validation step that blocks
+      # promotion unless all jobs succeeded.
+      fail-fast: false
+      matrix:
+        family_info: ${{ fromJSON(inputs.matrix_per_family_json) }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: math-libs
+      stage_display_name: "Stage - Math Libs (${{ matrix.family_info.amdgpu_family }})"
+      timeout_minutes: 480  # 8 hours
+      amdgpu_family: ${{ matrix.family_info.amdgpu_family }}
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
+      release_type: ${{ inputs.release_type }}
+    permissions:
+      contents: read
+      id-token: write
 
-  # # ==========================================================================
-  # # STAGE: comm-libs (per-arch, parallel to math-libs)
-  # # ==========================================================================
-  # comm-libs:
-  #   needs: compiler-runtime
-  #   if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'comm-libs') }}
-  #   strategy:
-  #     # See comment on math-libs fail-fast above.
-  #     fail-fast: false
-  #     matrix:
-  #       family_info: ${{ fromJSON(inputs.matrix_per_family_json) }}
-  #   uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-  #   secrets: inherit
-  #   with:
-  #     stage_name: comm-libs
-  #     stage_display_name: "Stage - Comm Libs (${{ matrix.family_info.amdgpu_family }})"
-  #     timeout_minutes: 240  # 4 hours
-  #     amdgpu_family: ${{ matrix.family_info.amdgpu_family }}
-  #     dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-  #     rocm_package_version: ${{ inputs.rocm_package_version }}
-  #     build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-  #     release_type: ${{ inputs.release_type }}
-  #   permissions:
-  #     contents: read
-  #     id-token: write
+  # ==========================================================================
+  # STAGE: comm-libs (per-arch, parallel to math-libs)
+  # ==========================================================================
+  comm-libs:
+    needs: compiler-runtime
+    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'comm-libs') }}
+    strategy:
+      # See comment on math-libs fail-fast above.
+      fail-fast: false
+      matrix:
+        family_info: ${{ fromJSON(inputs.matrix_per_family_json) }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: comm-libs
+      stage_display_name: "Stage - Comm Libs (${{ matrix.family_info.amdgpu_family }})"
+      timeout_minutes: 240  # 4 hours
+      amdgpu_family: ${{ matrix.family_info.amdgpu_family }}
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
+      release_type: ${{ inputs.release_type }}
+    permissions:
+      contents: read
+      id-token: write
 
-  # # ==========================================================================
-  # # STAGE: debug-tools (generic, parallel to math-libs)
-  # # ==========================================================================
-  # debug-tools:
-  #   needs: compiler-runtime
-  #   if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'debug-tools') }}
-  #   uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-  #   secrets: inherit
-  #   with:
-  #     stage_name: debug-tools
-  #     stage_display_name: "Stage - Debug Tools"
-  #     timeout_minutes: 180  # 3 hours
-  #     dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-  #     rocm_package_version: ${{ inputs.rocm_package_version }}
-  #     build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-  #     release_type: ${{ inputs.release_type }}
-  #   permissions:
-  #     contents: read
-  #     id-token: write
+  # ==========================================================================
+  # STAGE: debug-tools (generic, parallel to math-libs)
+  # ==========================================================================
+  debug-tools:
+    needs: compiler-runtime
+    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'debug-tools') }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: debug-tools
+      stage_display_name: "Stage - Debug Tools"
+      timeout_minutes: 180  # 3 hours
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
+      release_type: ${{ inputs.release_type }}
+    permissions:
+      contents: read
+      id-token: write
 
-  # # ==========================================================================
-  # # STAGE: dctools-core (generic, parallel to math-libs)
-  # # ==========================================================================
-  # dctools-core:
-  #   needs: compiler-runtime
-  #   if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'dctools-core') }}
-  #   uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-  #   secrets: inherit
-  #   with:
-  #     stage_name: dctools-core
-  #     stage_display_name: "Stage - DC Tools Core"
-  #     timeout_minutes: 120  # 2 hours
-  #     dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-  #     rocm_package_version: ${{ inputs.rocm_package_version }}
-  #     build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-  #     release_type: ${{ inputs.release_type }}
-  #   permissions:
-  #     contents: read
-  #     id-token: write
+  # ==========================================================================
+  # STAGE: dctools-core (generic, parallel to math-libs)
+  # ==========================================================================
+  dctools-core:
+    needs: compiler-runtime
+    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'dctools-core') }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: dctools-core
+      stage_display_name: "Stage - DC Tools Core"
+      timeout_minutes: 120  # 2 hours
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
+      release_type: ${{ inputs.release_type }}
+    permissions:
+      contents: read
+      id-token: write
 
-  # # ==========================================================================
-  # # STAGE: profiler-apps (generic, parallel to math-libs)
-  # # ==========================================================================
-  # profiler-apps:
-  #   needs: compiler-runtime
-  #   if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'profiler-apps') }}
-  #   uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-  #   secrets: inherit
-  #   with:
-  #     stage_name: profiler-apps
-  #     stage_display_name: "Stage - Profiler Apps"
-  #     timeout_minutes: 180  # 3 hours
-  #     dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-  #     rocm_package_version: ${{ inputs.rocm_package_version }}
-  #     build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-  #     release_type: ${{ inputs.release_type }}
-  #   permissions:
-  #     contents: read
-  #     id-token: write
+  # ==========================================================================
+  # STAGE: profiler-apps (generic, parallel to math-libs)
+  # ==========================================================================
+  profiler-apps:
+    needs: compiler-runtime
+    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'profiler-apps') }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: profiler-apps
+      stage_display_name: "Stage - Profiler Apps"
+      timeout_minutes: 180  # 3 hours
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
+      release_type: ${{ inputs.release_type }}
+    permissions:
+      contents: read
+      id-token: write
 
-  # # ==========================================================================
-  # # STAGE: iree-compiler (generic, parallel to math-libs)
-  # # ==========================================================================
-  # iree-compiler:
-  #   needs: compiler-runtime
-  #   if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'iree-compiler') }}
-  #   uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-  #   secrets: inherit
-  #   with:
-  #     stage_name: iree-compiler
-  #     stage_display_name: "Stage - IREE Compiler"
-  #     timeout_minutes: 90  # 1.5 hours - iree is not _yet_ building with a common llvm, it includes its own.
-  #     dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-  #     rocm_package_version: ${{ inputs.rocm_package_version }}
-  #     build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-  #     release_type: ${{ inputs.release_type }}
-  #   permissions:
-  #     contents: read
-  #     id-token: write
+  # ==========================================================================
+  # STAGE: iree-compiler (generic, parallel to math-libs)
+  # ==========================================================================
+  iree-compiler:
+    needs: compiler-runtime
+    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'iree-compiler') }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: iree-compiler
+      stage_display_name: "Stage - IREE Compiler"
+      timeout_minutes: 90  # 1.5 hours - iree is not _yet_ building with a common llvm, it includes its own.
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
+      release_type: ${{ inputs.release_type }}
+    permissions:
+      contents: read
+      id-token: write
 
-  # # ==========================================================================
-  # # STAGE: fusilli-libs (generic, after math-libs + iree-compiler)
-  # # ==========================================================================
-  # # TODO: re-enable for ASAN once fusilli-libs build is validated to work
-  # fusilli-libs:
-  #   needs: [compiler-runtime, math-libs, iree-compiler]
-  #   if: >-
-  #     ${{
-  #       !cancelled() &&
-  #       !failure() &&
-  #       !contains(inputs.prebuilt_stages, 'fusilli-libs') &&
-  #       inputs.build_variant_label != 'asan'
-  #     }}
-  #   uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-  #   secrets: inherit
-  #   with:
-  #     stage_name: fusilli-libs
-  #     stage_display_name: "Stage - Fusilli Libs"
-  #     timeout_minutes: 60  # 1 hour
-  #     dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-  #     rocm_package_version: ${{ inputs.rocm_package_version }}
-  #     build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-  #     release_type: ${{ inputs.release_type }}
-  #   permissions:
-  #     contents: read
-  #     id-token: write
+  # ==========================================================================
+  # STAGE: fusilli-libs (generic, after math-libs + iree-compiler)
+  # ==========================================================================
+  # TODO: re-enable for ASAN once fusilli-libs build is validated to work
+  fusilli-libs:
+    needs: [compiler-runtime, math-libs, iree-compiler]
+    if: >-
+      ${{
+        !cancelled() &&
+        !failure() &&
+        !contains(inputs.prebuilt_stages, 'fusilli-libs') &&
+        inputs.build_variant_label != 'asan'
+      }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: fusilli-libs
+      stage_display_name: "Stage - Fusilli Libs"
+      timeout_minutes: 60  # 1 hour
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
+      release_type: ${{ inputs.release_type }}
+    permissions:
+      contents: read
+      id-token: write
 
-  # # ==========================================================================
-  # # STAGE: media-libs (generic)
-  # # ==========================================================================
-  # media-libs:
-  #   needs: compiler-runtime
-  #   if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'media-libs') }}
-  #   uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
-  #   secrets: inherit
-  #   with:
-  #     stage_name: media-libs
-  #     stage_display_name: "Stage - Media Libs"
-  #     timeout_minutes: 180  # 3 hours
-  #     dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
-  #     rocm_package_version: ${{ inputs.rocm_package_version }}
-  #     build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
-  #     release_type: ${{ inputs.release_type }}
-  #   permissions:
-  #     contents: read
-  #     id-token: write
+  # ==========================================================================
+  # STAGE: media-libs (generic)
+  # ==========================================================================
+  media-libs:
+    needs: compiler-runtime
+    if: ${{ !cancelled() && !failure() && !contains(inputs.prebuilt_stages, 'media-libs') }}
+    uses: ./.github/workflows/multi_arch_build_portable_linux_artifacts.yml
+    secrets: inherit
+    with:
+      stage_name: media-libs
+      stage_display_name: "Stage - Media Libs"
+      timeout_minutes: 180  # 3 hours
+      dist_amdgpu_families: ${{ inputs.dist_amdgpu_families }}
+      rocm_package_version: ${{ inputs.rocm_package_version }}
+      build_variant_cmake_preset: ${{ inputs.build_variant_cmake_preset }}
+      release_type: ${{ inputs.release_type }}
+    permissions:
+      contents: read
+      id-token: write
