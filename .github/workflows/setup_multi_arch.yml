@@ -20,6 +20,14 @@ on:
         description: Prerelease version number such as '2'. This gets appended to the computed version after 'rc', like '7.10.0rc2'
         type: string
         default: ""
+      repository:
+        description: "Repository to checkout. Defaults to github.repository."
+        type: string
+        default: ""
+      ref:
+        description: "Branch, tag, or SHA to checkout. Defaults to the triggering ref."
+        type: string
+        default: ""
     outputs:
       enable_build_jobs:
         description: Whether to enable build jobs.
@@ -61,6 +69,8 @@ jobs:
       - name: Checking out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || '' }}
           # We need the parent commit to do a diff
           fetch-depth: 2
 
