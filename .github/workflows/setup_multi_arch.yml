@@ -82,8 +82,12 @@ jobs:
           # We need the parent commit to do a diff
           fetch-depth: 2
 
-      # The script reads GITHUB_EVENT_PATH directly for PR labels and
-      # workflow_dispatch inputs — no env var pass-through needed.
+      - name: Debug event payload
+        run: |
+          echo "GITHUB_EVENT_NAME=$GITHUB_EVENT_NAME"
+          echo "GITHUB_EVENT_PATH=$GITHUB_EVENT_PATH"
+          cat "$GITHUB_EVENT_PATH" | python -m json.tool
+
       - name: Configuring CI options
         id: configure
         env:
