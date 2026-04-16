@@ -119,9 +119,9 @@ amdgpu_family_info_matrix_presubmit = {
             "sanity_check_only_for_family": True,
         },
         "windows": {
-            "test-runs-on": "windows-gfx1151-gpu-rocm",
+            "test-runs-on": "test_setup_windows_igpu_stxh",
             # TODO(#2754): Add new benchmark-runs-on runner for benchmarks
-            "benchmark-runs-on": "windows-gfx1151-gpu-rocm",
+            "benchmark-runs-on": "test_setup_windows_igpu_stxh",
             "family": "gfx1151",
             "fetch-gfx-targets": ["gfx1151"],
             "build_variants": ["release"],
@@ -143,9 +143,9 @@ amdgpu_family_info_matrix_presubmit = {
         "windows": {
             # TODO(#2962): Re-enable machine once sanity checks work with this architecture
             # Label is windows-gfx120X-gpu-rocm, fetch-gfx-targets should be ["gfx1200", "gfx1201"]
-            "test-runs-on": "",
+            "test-runs-on": "test_setup_windows_gpu_navi4x",
             "family": "gfx120X-all",
-            "fetch-gfx-targets": [],
+            "fetch-gfx-targets": ["gfx1200", "gfx1201"],
             "bypass_tests_for_releases": True,
             "build_variants": ["release"],
         },
