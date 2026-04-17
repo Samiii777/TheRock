@@ -374,7 +374,7 @@ jobs:
             { "artifact_group": "${{ matrix.target_bundle.amdgpu_family }}",
               "rocm_version": "${{ needs.setup_metadata.outputs.rpm_version }}",
               "release_type": "${{ env.RELEASE_TYPE }}",
-              "artifact_run_id": "${{ github.run_id  }}",
+              "artifact_run_id": "${{ github.run_id }}",
               "ref": "${{ inputs.ref || '' }}",
               "native_package_type": "rpm"
             }
@@ -388,7 +388,127 @@ jobs:
             { "artifact_group": "${{ matrix.target_bundle.amdgpu_family }}",
               "rocm_version": "${{ needs.setup_metadata.outputs.deb_version }}",
               "release_type": "${{ env.RELEASE_TYPE }}",
-              "artifact_run_id": "${{ github.run_id  }}",
+              "artifact_run_id": "${{ github.run_id }}",
               "ref": "${{ inputs.ref || '' }}",
               "native_package_type": "deb"
             }
+
+  prepare_native_linux_package_install_tests:
+    name: Prepare native Linux package install test inputs
+    needs: [portable_linux_packages, setup_metadata]
+    if: ${{ github.repository_owner == 'ROCm' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      deb_package_install_url: ${{ steps.urls.outputs.deb_package_install_url }}
+      rpm_package_install_url: ${{ steps.urls.outputs.rpm_package_install_url }}
+      primary_amdgpu_family: ${{ steps.urls.outputs.primary_amdgpu_family }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || '' }}
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: 3.12
+
+      - name: Resolve install repo URLs and primary AMDGPU family
+        id: urls
+        run: |
+          set -euo pipefail
+          REPO="${{ inputs.repository || github.repository }}"
+          IS_FORK="false"
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            IS_FORK="true"
+          fi
+          DEB_VER="${{ needs.setup_metadata.outputs.deb_version }}"
+          RPM_VER="${{ needs.setup_metadata.outputs.rpm_version }}"
+          deb_line=$(python ./build_tools/packaging/linux/get_s3_config.py \
+            --release-type="${{ needs.setup_metadata.outputs.release_type }}" \
+            --repository="$REPO" \
+            --is-fork="$IS_FORK" \
+            --pkg-type=deb \
+            --artifact-id="${{ github.run_id }}" \
+            --rocm-version="$DEB_VER" \
+            --output-format github | grep '^package_repository_url=' || true)
+          rpm_line=$(python ./build_tools/packaging/linux/get_s3_config.py \
+            --release-type="${{ needs.setup_metadata.outputs.release_type }}" \
+            --repository="$REPO" \
+            --is-fork="$IS_FORK" \
+            --pkg-type=rpm \
+            --artifact-id="${{ github.run_id }}" \
+            --rocm-version="$RPM_VER" \
+            --output-format github | grep '^package_repository_url=' || true)
+          if [ -z "$deb_line" ] || [ -z "$rpm_line" ]; then
+            echo "Could not resolve native package repository URLs from get_s3_config.py" >&2
+            exit 1
+          fi
+          echo "deb_package_install_url=${deb_line#package_repository_url=}" >> "$GITHUB_OUTPUT"
+          echo "rpm_package_install_url=${rpm_line#package_repository_url=}" >> "$GITHUB_OUTPUT"
+          python3 -c "import json, os; t=json.loads(os.environ['PT']); print('primary_amdgpu_family=' + t[0]['amdgpu_family'])" >> "$GITHUB_OUTPUT"
+        env:
+          PT: ${{ needs.setup_metadata.outputs.package_targets }}
+
+      # Native builds are triggered asynchronously from portable_linux_packages; install tests
+      # otherwise race the CDN (403 on repomd / flaky zypper). Block here until metadata exists.
+      - name: Wait for native DEB and RPM repos on CDN
+        env:
+          DEB_BASE: ${{ steps.urls.outputs.deb_package_install_url }}
+          RPM_BASE: ${{ steps.urls.outputs.rpm_package_install_url }}
+        run: |
+          set -euo pipefail
+          DEB_BASE="${DEB_BASE%/}"
+          RPM_BASE="${RPM_BASE%/}"
+          DEB_PROBE="${DEB_BASE}/dists/stable/Release"
+          RPM_PROBE="${RPM_BASE}/repodata/repomd.xml"
+          MAX_WAIT="${RELEASE_NATIVE_REPO_WAIT_SEC:-1800}"
+          POLL="${RELEASE_NATIVE_REPO_POLL_INTERVAL:-30}"
+          deadline=$(($(date +%s) + MAX_WAIT))
+          echo "Waiting up to ${MAX_WAIT}s (poll every ${POLL}s) for:"
+          echo "  DEB:  ${DEB_PROBE}"
+          echo "  RPM:  ${RPM_PROBE}"
+          while [[ $(date +%s) -lt $deadline ]]; do
+            deb_ok=0
+            rpm_ok=0
+            if curl -fsS --max-time 120 -o /dev/null "$DEB_PROBE"; then deb_ok=1; fi
+            if curl -fsS --max-time 120 -o /dev/null "$RPM_PROBE"; then rpm_ok=1; fi
+            if [[ "$deb_ok" -eq 1 && "$rpm_ok" -eq 1 ]]; then
+              echo "Native package repos are reachable on CDN."
+              exit 0
+            fi
+            echo "[wait] deb_ok=${deb_ok} rpm_ok=${rpm_ok} — sleeping ${POLL}s..."
+            sleep "$POLL"
+          done
+          echo "[FAIL] Timed out after ${MAX_WAIT}s waiting for native repos (async builds may have failed or are too slow)." >&2
+          echo "Override wait: set env RELEASE_NATIVE_REPO_WAIT_SEC / RELEASE_NATIVE_REPO_POLL_INTERVAL on the job if needed." >&2
+          exit 1
+
+  native_linux_packages_install_tests:
+    name: Test ${{ matrix.pkg_type }} install - ${{ matrix.os_profile }}
+    needs: [prepare_native_linux_package_install_tests, setup_metadata]
+    if: ${{ github.repository_owner == 'ROCm' }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkg_type: deb
+            os_profile: ubuntu2404
+            package_install_url: ${{ needs.prepare_native_linux_package_install_tests.outputs.deb_package_install_url }}
+          - pkg_type: rpm
+            os_profile: rhel10
+            package_install_url: ${{ needs.prepare_native_linux_package_install_tests.outputs.rpm_package_install_url }}
+          - pkg_type: rpm
+            os_profile: sles16
+            package_install_url: ${{ needs.prepare_native_linux_package_install_tests.outputs.rpm_package_install_url }}
+    uses: ./.github/workflows/test_native_linux_packages_install.yml
+    with:
+      package_install_url: ${{ matrix.package_install_url }}
+      release_type: ${{ needs.setup_metadata.outputs.release_type }}
+      os_profile: ${{ matrix.os_profile }}
+      artifact_group: ${{ needs.prepare_native_linux_package_install_tests.outputs.primary_amdgpu_family }}
+      test_type: sanity
