@@ -62,16 +62,11 @@ instructions and configurations for alternatives.
 ```bash
 # Install Ubuntu dependencies
 sudo apt update
-sudo apt install gfortran git ninja-build cmake g++ pkg-config xxd automake libtool python3-venv python3-dev libegl1-mesa-dev texinfo bison flex
+sudo apt install gfortran git ninja-build cmake g++ pkg-config xxd patchelf automake libtool python3-venv python3-dev libegl1-mesa-dev texinfo bison flex
 
 # Clone the repository
 git clone https://github.com/ROCm/TheRock.git
 cd TheRock
-
-# Install a patched patchelf from source. For details see
-# https://github.com/ROCm/TheRock/blob/main/docs/environment_setup_guide.md#patchelf
-sudo apt install curl make
-sudo env INSTALL_PREFIX=/usr/local ./dockerfiles/install_pinned_patchelf.sh
 
 # Init python virtual environment and install python dependencies
 python3 -m venv .venv && source .venv/bin/activate
@@ -177,6 +172,7 @@ minimal build):
 | `-DTHEROCK_ENABLE_CORE_AMDSMI=ON`      | Enables the AMD System Management Interface library |
 | `-DTHEROCK_ENABLE_HIPIFY=ON`           | Enables the hipify tool                             |
 | `-DTHEROCK_ENABLE_CORE_RUNTIME=ON`     | Enables the core runtime components and tools       |
+| `-DTHEROCK_ENABLE_WSL_ROCDXG=ON`       | Enables the WSL-only ROCDXG bridge library build    |
 | `-DTHEROCK_ENABLE_HIP_RUNTIME=ON`      | Enables the HIP runtime components                  |
 | `-DTHEROCK_ENABLE_OCL_RUNTIME=ON`      | Enables the OpenCL runtime components               |
 | `-DTHEROCK_ENABLE_ROCGDB=ON`           | Enables the ROCm debugger (ROCgdb)                  |
@@ -217,6 +213,12 @@ hipDNN provider plugins:
 > libraries (like MIOpen) have a number of *optional* dependencies, which must
 > be enabled manually if enabling/disabling individual features.
 
+> [!NOTE]
+> `-DTHEROCK_ENABLE_WSL_ROCDXG=ON` is intended for the dedicated Windows-hosted
+> WSL build flow that produces the `rocdxg` bridge library. The top-level
+> TheRock configure and build run inside WSL for that stage, even though the
+> special runner itself is Windows-hosted.
+
 > [!TIP]
 > A report of enabled/disabled features and flags will be printed on every
 > CMake configure.
@@ -239,10 +241,9 @@ The following components accept specifying alternative source locations:
 
 Further flags allow to build components with specific features enabled.
 
-| Other flags                                       | Description                                                              |
-| ------------------------------------------------- | ------------------------------------------------------------------------ |
-| `-DTHEROCK_ENABLE_MPI=OFF`                        | Enables building components with Message Passing Interface (MPI) support |
-| `-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=OFF` | Builds composable_kernel with only the targets required for MIOpen       |
+| Other flags                | Description                                                              |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `-DTHEROCK_ENABLE_MPI=OFF` | Enables building components with Message Passing Interface (MPI) support |
 
 > [!NOTE]
 > Building components with MPI support, currently requires MPI to be

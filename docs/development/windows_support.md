@@ -277,6 +277,11 @@ Unsupported subprojects like RCCL are automatically disabled on Windows. See
 the [instructions in the root README](../../README.md#configuration) for other
 options you may want to set.
 
+If you are using the dedicated Windows-hosted WSL runner flow for the `rocdxg`
+bridge library, the top-level flag is `-DTHEROCK_ENABLE_WSL_ROCDXG=ON`. That
+stage runs the top-level TheRock configure/build from `wsl-bash`, even though
+the special runner itself is a Windows machine.
+
 ```bash
 cmake -B build -GNinja . -DTHEROCK_AMDGPU_FAMILIES=gfx110X-all
 
