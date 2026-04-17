@@ -154,11 +154,13 @@ jobs:
         shell: wsl-bash {0}
         run: |
           wsl_build_dir="/tmp/therock-wsl-rocdxg/build"
+          wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
           win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${{ steps.detect_sdk.outputs.sdk_version }}/shared"
           if [ ! -d "$win_sdk" ]; then
             echo "Windows SDK include path not found: $win_sdk"
             exit 1
           fi
+          source "${wsl_venv_dir}/bin/activate"
           cd "$THEROCK_HOST_WORKSPACE"
           cmake -B "${wsl_build_dir}" -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -172,6 +174,7 @@ jobs:
           stage_name="${{ inputs.stage_name }}"
           wsl_build_dir="/tmp/therock-wsl-rocdxg/build"
           wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
+          source "${wsl_venv_dir}/bin/activate"
           "${wsl_venv_dir}/bin/python" "${THEROCK_HOST_WORKSPACE}/build_tools/memory_monitor.py" --phase Build -- \
             cmake --build "${wsl_build_dir}" --target "stage-${stage_name}" therock-artifacts -- -k 0
 
