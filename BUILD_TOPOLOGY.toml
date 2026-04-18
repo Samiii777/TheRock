@@ -222,8 +222,8 @@ source_sets = ["rocm-systems"]
 [artifact_groups.wsl-rocdxg]
 description = "WSL-only ROCDXG bridge library"
 type = "generic"
-artifact_group_deps = ["base"]
-source_sets = ["base", "rocm-systems"]
+artifact_group_deps = []
+source_sets = ["rocm-systems"]
 
 [artifact_groups.core-amdsmi]
 description = "AMD SMI tool (amdsmi)"
@@ -497,7 +497,7 @@ disable_platforms = ["windows"]
 [artifacts.wsl-rocdxg]
 artifact_group = "wsl-rocdxg"
 type = "target-neutral"
-artifact_deps = ["base"]
+artifact_deps = []
 feature_name = "WSL_ROCDXG"
 feature_group = "CORE"
 

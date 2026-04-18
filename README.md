@@ -172,7 +172,6 @@ minimal build):
 | `-DTHEROCK_ENABLE_CORE_AMDSMI=ON`      | Enables the AMD System Management Interface library |
 | `-DTHEROCK_ENABLE_HIPIFY=ON`           | Enables the hipify tool                             |
 | `-DTHEROCK_ENABLE_CORE_RUNTIME=ON`     | Enables the core runtime components and tools       |
-| `-DTHEROCK_ENABLE_WSL_ROCDXG=ON`       | Enables the WSL-only ROCDXG bridge library build    |
 | `-DTHEROCK_ENABLE_HIP_RUNTIME=ON`      | Enables the HIP runtime components                  |
 | `-DTHEROCK_ENABLE_OCL_RUNTIME=ON`      | Enables the OpenCL runtime components               |
 | `-DTHEROCK_ENABLE_ROCGDB=ON`           | Enables the ROCm debugger (ROCgdb)                  |
@@ -212,12 +211,6 @@ hipDNN provider plugins:
 > Enabling any features will implicitly enable their *minimum* dependencies. Some
 > libraries (like MIOpen) have a number of *optional* dependencies, which must
 > be enabled manually if enabling/disabling individual features.
-
-> [!NOTE]
-> `-DTHEROCK_ENABLE_WSL_ROCDXG=ON` is intended for the dedicated Windows-hosted
-> WSL build flow that produces the `rocdxg` bridge library. The top-level
-> TheRock configure and build run inside WSL for that stage, even though the
-> special runner itself is Windows-hosted.
 
 > [!TIP]
 > A report of enabled/disabled features and flags will be printed on every
