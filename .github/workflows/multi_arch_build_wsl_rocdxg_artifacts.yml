@@ -178,6 +178,7 @@ jobs:
           cmake -B "${THEROCK_HOST_BUILD_DIR}" -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DTHEROCK_PACKAGE_VERSION=${{ inputs.rocm_package_version }} \
+            -DTHEROCK_BUNDLE_SYSDEPS=OFF \
             -DTHEROCK_WSL_WIN_SDK="$win_sdk" \
             ${{ steps.stage_config.outputs.cmake_args }}
 
