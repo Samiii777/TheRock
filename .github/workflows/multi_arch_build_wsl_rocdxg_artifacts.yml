@@ -46,7 +46,8 @@ jobs:
       STAGE_NAME: ${{ inputs.stage_name }}
       RELEASE_TYPE: ${{ inputs.release_type }}
       THEROCK_HOST_WORKSPACE: ${{ github.workspace }}
-      WSLENV: THEROCK_HOST_WORKSPACE/p
+      THEROCK_HOST_BUILD_DIR: ${{ github.workspace }}\build-wsl-rocdxg
+      WSLENV: THEROCK_HOST_WORKSPACE/p:THEROCK_HOST_BUILD_DIR/p
 
     steps:
       - name: Checkout Repository
@@ -107,9 +108,8 @@ jobs:
         shell: wsl-bash {0}
         run: |
           # setup-wsl's default wsl-bash wrapper runs `bash --noprofile --norc -euo pipefail`.
-          # THEROCK_HOST_WORKSPACE is bridged from the Windows host through WSLENV because it
-          # starts as a host path. Avoid depending on other job-level env vars inside wsl-bash;
-          # keep WSL-local paths and other step inputs defined in the step body.
+          # Explicitly bridged path vars from the Windows host are available in wsl-bash via
+          # WSLENV. Keep WSL-local state such as the venv itself under /tmp.
           wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
           python3 "${THEROCK_HOST_WORKSPACE}/build_tools/setup_venv.py" "${wsl_venv_dir}"
           "${wsl_venv_dir}/bin/python" -m pip install -r "${THEROCK_HOST_WORKSPACE}/requirements.txt"
@@ -136,33 +136,46 @@ jobs:
           wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
           "${wsl_venv_dir}/bin/python" -m pip install ${{ steps.stage_config.outputs.pip_install_cmd }}
 
+      - name: Prepare WSL paths
+        shell: wsl-bash {0}
+        env:
+          # Extend WSLENV at step scope because this path depends on the
+          # detect_sdk step output and cannot be defined in job-level env.
+          THEROCK_WIN_SDK_SHARED: C:\Program Files (x86)\Windows Kits\10\Include\${{ steps.detect_sdk.outputs.sdk_version }}\shared
+          WSLENV: THEROCK_HOST_WORKSPACE/p:THEROCK_HOST_BUILD_DIR/p:THEROCK_WIN_SDK_SHARED/p
+        run: |
+          if [ ! -d "${THEROCK_WIN_SDK_SHARED}" ]; then
+            echo "Windows SDK include path not found: ${THEROCK_WIN_SDK_SHARED}"
+            exit 1
+          fi
+          mkdir -p "${THEROCK_HOST_BUILD_DIR}"
+          # Route the mounted SDK path through a stable symlink without spaces or
+          # parentheses because nested subproject configure invocations are
+          # shell-escaped and /bin/sh will misparse the raw "(x86)" segment.
+          win_sdk="/tmp/therock-wsl-rocdxg/windows-sdk-shared"
+          ln -sfn "${THEROCK_WIN_SDK_SHARED}" "$win_sdk"
+
       - name: Fetch inbound artifacts
         shell: wsl-bash {0}
         run: |
           stage_name="${{ inputs.stage_name }}"
-          wsl_build_dir="/tmp/therock-wsl-rocdxg/build"
           wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
-          mkdir -p "${wsl_build_dir}"
+          mkdir -p "${THEROCK_HOST_BUILD_DIR}"
           "${wsl_venv_dir}/bin/python" "${THEROCK_HOST_WORKSPACE}/build_tools/artifact_manager.py" fetch \
             --run-id="${{ github.run_id }}" \
             --platform=linux \
             --stage="${stage_name}" \
-            --output-dir="${wsl_build_dir}" \
+            --output-dir="${THEROCK_HOST_BUILD_DIR}" \
             --bootstrap
 
       - name: Configure
         shell: wsl-bash {0}
         run: |
-          wsl_build_dir="/tmp/therock-wsl-rocdxg/build"
           wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
-          win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${{ steps.detect_sdk.outputs.sdk_version }}/shared"
-          if [ ! -d "$win_sdk" ]; then
-            echo "Windows SDK include path not found: $win_sdk"
-            exit 1
-          fi
+          win_sdk="/tmp/therock-wsl-rocdxg/windows-sdk-shared"
           source "${wsl_venv_dir}/bin/activate"
           cd "$THEROCK_HOST_WORKSPACE"
-          cmake -B "${wsl_build_dir}" -S . -G Ninja \
+          cmake -B "${THEROCK_HOST_BUILD_DIR}" -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DTHEROCK_PACKAGE_VERSION=${{ inputs.rocm_package_version }} \
             -DTHEROCK_WSL_WIN_SDK="$win_sdk" \
@@ -172,19 +185,16 @@ jobs:
         shell: wsl-bash {0}
         run: |
           stage_name="${{ inputs.stage_name }}"
-          wsl_build_dir="/tmp/therock-wsl-rocdxg/build"
           wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
           source "${wsl_venv_dir}/bin/activate"
           "${wsl_venv_dir}/bin/python" "${THEROCK_HOST_WORKSPACE}/build_tools/memory_monitor.py" --phase Build -- \
-            cmake --build "${wsl_build_dir}" --target "stage-${stage_name}" therock-artifacts -- -k 0
+            cmake --build "${THEROCK_HOST_BUILD_DIR}" --target "stage-${stage_name}" therock-artifacts -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
-        shell: wsl-bash {0}
         run: |
-          wsl_build_dir="/tmp/therock-wsl-rocdxg/build"
           echo "Artifacts:"
-          ls -lh "${wsl_build_dir}"/artifacts/*.tar.xz 2>/dev/null || echo "No artifacts found"
+          ls -lh "${THEROCK_HOST_BUILD_DIR}"/artifacts/*.tar.xz 2>/dev/null || echo "No artifacts found"
 
       - name: Configure AWS credentials for artifact uploads
         if: ${{ always() }}
@@ -193,25 +203,17 @@ jobs:
           release_type: ${{ inputs.release_type }}
 
       - name: Push stage artifacts
-        shell: wsl-bash {0}
         run: |
-          stage_name="${{ inputs.stage_name }}"
-          wsl_build_dir="/tmp/therock-wsl-rocdxg/build"
-          wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
-          "${wsl_venv_dir}/bin/python" "${THEROCK_HOST_WORKSPACE}/build_tools/artifact_manager.py" push --run-id ${{ github.run_id }} \
+          python build_tools/artifact_manager.py push --run-id ${{ github.run_id }} \
             --platform linux \
-            --stage="${stage_name}" \
-            --build-dir="${wsl_build_dir}"
+            --stage="${STAGE_NAME}" \
+            --build-dir="${THEROCK_HOST_BUILD_DIR}"
 
       - name: Upload stage logs
         if: ${{ always() }}
-        shell: wsl-bash {0}
         run: |
-          stage_name="${{ inputs.stage_name }}"
-          wsl_build_dir="/tmp/therock-wsl-rocdxg/build"
-          wsl_venv_dir="/tmp/therock-wsl-rocdxg/.venv"
-          "${wsl_venv_dir}/bin/python" "${THEROCK_HOST_WORKSPACE}/build_tools/github_actions/post_stage_upload.py" \
+          python build_tools/github_actions/post_stage_upload.py \
             --run-id=${{ github.run_id }} \
-            --stage="${stage_name}" \
-            --build-dir="${wsl_build_dir}" \
+            --stage="${STAGE_NAME}" \
+            --build-dir="${THEROCK_HOST_BUILD_DIR}" \
             --amdgpu-family=""
