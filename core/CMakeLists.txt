@@ -173,14 +173,24 @@ if(THEROCK_ENABLE_CORE_RUNTIME)
 endif(THEROCK_ENABLE_CORE_RUNTIME)
 
 if(THEROCK_ENABLE_WSL_ROCDXG)
+  if(NOT THEROCK_WSL_WIN_SDK)
+    message(FATAL_ERROR "THEROCK_WSL_WIN_SDK must be set when THEROCK_ENABLE_WSL_ROCDXG=ON")
+  endif()
+
   # Fingerprint only the files that feed the upstream WSL ROCDXG build.
   # This list is derived from rocm-systems/projects/rocr-runtime/libhsakmt/
   # CMakeLists_wsl.txt and the files it directly compiles/includes.
+  # The upstream WSL rocdxg path expects the mounted Windows SDK shared include
+  # directory to be provided explicitly, so forward THEROCK_WSL_WIN_SDK into
+  # the nested subproject configure.
   therock_cmake_subproject_declare(therock-wsl-rocdxg
     EXTERNAL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/wsl-rocdxg"
     BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/wsl-rocdxg"
     USE_DIST_AMDGPU_TARGETS
     BACKGROUND_BUILD
+    CMAKE_ARGS
+      "-DTHEROCK_BUNDLE_SYSDEPS=OFF"
+      "-DTHEROCK_WSL_WIN_SDK=${THEROCK_WSL_WIN_SDK}"
     FPRINT_SOURCE_DIR "${THEROCK_ROCM_SYSTEMS_SOURCE_DIR}/projects/rocr-runtime/libhsakmt"
     FPRINT_FILE_GLOBS
       "${THEROCK_ROCM_SYSTEMS_SOURCE_DIR}/projects/rocr-runtime/libhsakmt/CMakeLists.txt"
