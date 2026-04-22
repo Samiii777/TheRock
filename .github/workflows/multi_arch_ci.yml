@@ -84,6 +84,43 @@ jobs:
       contents: read
       id-token: write
 
+  linux_build_tarballs:
+    needs: [setup, linux_build_and_test]
+    if: >-
+      ${{
+        needs.setup.outputs.linux_build_config != '' &&
+        needs.setup.outputs.enable_build_jobs == 'true' &&
+        needs.setup.outputs.build_jax == 'run'
+      }}
+    uses: ./.github/workflows/multi_arch_build_tarballs.yml
+    secrets: inherit
+    with:
+      artifact_run_id: ${{ github.run_id }}
+      artifact_github_repo: ${{ github.repository }}
+      dist_amdgpu_families: ${{ fromJSON(needs.setup.outputs.linux_build_config).dist_amdgpu_families }}
+      jax_amdgpu_family: ${{ needs.setup.outputs.jax_amdgpu_family }}
+      platform: linux
+      package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      release_type: dev
+
+  linux_build_jax:
+    needs: [setup, linux_build_tarballs]
+    if: ${{ needs.setup.outputs.build_jax == 'run' && needs.setup.outputs.jax_amdgpu_family != '' }}
+    uses: ./.github/workflows/build_linux_jax_wheels.yml
+    secrets: inherit
+    with:
+      amdgpu_family: ${{ needs.setup.outputs.jax_amdgpu_family }}
+      python_version: "3.12"
+      release_type: dev
+      s3_subdir: "v2"
+      s3_staging_subdir: "v2-staging"
+      rocm_version: ${{ needs.setup.outputs.rocm_package_version }}
+      tar_url: ${{ needs.linux_build_tarballs.outputs.jax_tarball_url }}
+      cloudfront_url: "https://rocm.devreleases.amd.com/v2"
+      cloudfront_staging_url: "https://rocm.devreleases.amd.com/v2-staging"
+      run_tests: false
+      upload_wheels: false
+
   windows_build_and_test:
     name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
     needs: setup

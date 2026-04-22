@@ -971,6 +971,9 @@ def write_outputs(
     linux = outputs.builds.linux
     windows = outputs.builds.windows
     test_type = outputs.jobs.test_rocm.test_type if outputs.is_ci_enabled else ""
+    jax_amdgpu_family = ""
+    if outputs.jobs and outputs.jobs.build_jax.action == JobAction.RUN:
+        jax_amdgpu_family = "gfx110X-all"
     output_vars = {
         # Workflow YAML references this as 'enable_build_jobs'
         "enable_build_jobs": json.dumps(outputs.is_ci_enabled),
@@ -979,6 +982,8 @@ def write_outputs(
         "test_type": test_type,
         "linux_test_labels": outputs.linux_test_labels,
         "windows_test_labels": outputs.windows_test_labels,
+        "build_jax": outputs.jobs.build_jax.action.value if outputs.jobs else "skip",
+        "jax_amdgpu_family": jax_amdgpu_family,
     }
     gha_set_output(output_vars)
 

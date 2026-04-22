@@ -51,6 +51,17 @@ on:
       release_type:
         type: string
         default: ""
+      jax_amdgpu_family:
+        type: string
+        default: ""
+    outputs:
+      tarball_url:
+        description: "Default tarball URL"
+        value: ${{ jobs.build_tarballs.outputs.tarball_url }}
+      jax_tarball_url:
+        description: "Tarball URL for the selected JAX family"
+        value: ${{ jobs.build_tarballs.outputs.jax_tarball_url }}
+
 permissions:
   contents: read
 
@@ -62,6 +73,9 @@ jobs:
     runs-on: ${{ github.repository_owner == 'ROCm' && 'azure-linux-scale-rocm' || 'ubuntu-24.04' }}
     permissions:
       id-token: write
+    outputs:
+      tarball_url: ${{ steps.compute_tarball_url.outputs.tarball_url }}
+      jax_tarball_url: ${{ steps.compute_tarball_url.outputs.jax_tarball_url }}
     env:
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id != '' && inputs.artifact_run_id || github.run_id }}"
       RELEASE_TYPE: ${{ inputs.release_type }}
@@ -101,3 +115,82 @@ jobs:
             --run-id="${{ github.run_id }}" \
             --platform="${{ inputs.platform }}" \
             --release-type="${{ inputs.release_type }}"
+
+      - name: Generate tarball download URLs
+        id: compute_tarball_url
+        env:
+          AWS_REGION: us-east-2
+        run: |
+          python - <<'PY' >> "${GITHUB_OUTPUT}"
+          import boto3
+          import sys
+          from pathlib import Path
+
+          # Match upload_tarballs.py path setup so we can import WorkflowOutputRoot.
+          build_tools_dir = Path("build_tools").resolve()
+          sys.path.insert(0, str(build_tools_dir))
+
+          from _therock_utils.workflow_outputs import WorkflowOutputRoot
+
+          platform = "${{ inputs.platform }}"
+          package_version = "${{ inputs.package_version }}"
+          release_type = "${{ inputs.release_type }}"
+          families = [
+              f.strip()
+              for f in "${{ inputs.dist_amdgpu_families }}".split(";")
+              if f.strip()
+          ]
+          jax_family = "${{ inputs.jax_amdgpu_family }}".strip()
+          run_id = "${{ github.run_id }}"
+          region = "${AWS_REGION}"
+
+          output_root = WorkflowOutputRoot.from_workflow_run(
+              run_id=run_id,
+              platform=platform,
+              release_type=release_type or None,
+          )
+          dest = output_root.tarballs()
+
+          # dest.s3_uri looks like:
+          #   s3://<bucket>/<runid>-<platform>/tarballs
+          s3_uri = dest.s3_uri
+          if not s3_uri.startswith("s3://"):
+              raise RuntimeError(f"Unexpected tarballs destination URI: {s3_uri}")
+
+          bucket_and_key = s3_uri[len("s3://"):]
+          bucket, prefix = bucket_and_key.split("/", 1)
+
+          if len(families) == 1:
+              tarball_name = (
+                  f"therock-dist-{platform}-{families[0]}-{package_version}.tar.gz"
+              )
+          else:
+              tarball_name = f"therock-dist-{platform}-multiarch-{package_version}.tar.gz"
+
+          s3 = boto3.client("s3", region_name=region)
+
+          tarball_key = f"{prefix}/{tarball_name}"
+          s3.head_object(Bucket=bucket, Key=tarball_key)
+          tarball_url = s3.generate_presigned_url(
+              "get_object",
+              Params={"Bucket": bucket, "Key": tarball_key},
+              ExpiresIn=7 * 24 * 60 * 60,
+          )
+          print(f"tarball_url={tarball_url}")
+
+          if jax_family:
+              jax_tarball_name = (
+                  f"therock-dist-{platform}-{jax_family}-{package_version}.tar.gz"
+              )
+              jax_tarball_key = f"{prefix}/{jax_tarball_name}"
+              s3.head_object(Bucket=bucket, Key=jax_tarball_key)
+              jax_tarball_url = s3.generate_presigned_url(
+                  "get_object",
+                  Params={"Bucket": bucket, "Key": jax_tarball_key},
+                  ExpiresIn=7 * 24 * 60 * 60,
+              )
+          else:
+              jax_tarball_url = ""
+
+          print(f"jax_tarball_url={jax_tarball_url}")
+          PY
