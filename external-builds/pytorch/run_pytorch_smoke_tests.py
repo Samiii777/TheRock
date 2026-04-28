@@ -27,8 +27,7 @@ from pathlib import Path
 import pytest
 
 from pytorch_utils import (
-    get_unique_supported_devices_count,
-    set_gpu_execution_policy,
+    get_unique_supported_devices,
 )
 
 THIS_SCRIPT_DIR = Path(__file__).resolve().parent
@@ -90,10 +89,20 @@ def main() -> int:
             print(f"ERROR: Directory at '{smoke_tests_dir}' does not exist.")
             sys.exit(1)
 
-        # CRITICAL: Query unique device count for iteration.
-        # HIP_VISIBLE_DEVICES will be set inside set_gpu_execution_policy.
-        unique_device_count = get_unique_supported_devices_count(args.amdgpu_family)
+        # Detect the unique supported devices ONCE up front and then iterate
+        # over them. The device-detection helpers spawn a subprocess that
+        # imports torch and respects the HIP_VISIBLE_DEVICES env var. If we
+        # called the detection helper inside the per-device loop, the
+        # HIP_VISIBLE_DEVICES we set on iteration N would shrink the device
+        # set seen on iteration N+1, causing offset-based selection to fail
+        # with "Offset N out of range for ... unique devices" (issue #4889).
+        unique_devices = get_unique_supported_devices(args.amdgpu_family, log=True)
 
+        if not unique_devices:
+            print("[ERROR] No supported devices found")
+            sys.exit(1)
+
+        unique_device_count = len(unique_devices)
         print(f"Will run smoke tests on {unique_device_count} unique device(s)")
 
         # Track overall success
@@ -106,15 +115,16 @@ def main() -> int:
         # Append any passthrough pytest args passed after "--"
         pytest_args.extend(passthrough_pytest_args)
 
-        # Run smoke tests for each unique device iteratively using offset
-        for offset in range(unique_device_count):
-            # Set HIP_VISIBLE_DEVICES for this specific device using "unique-single" policy
-            ((arch, device_idx),) = set_gpu_execution_policy(
-                args.amdgpu_family, policy="unique-single", offset=offset
-            )
+        # Run smoke tests for each unique device iteratively. We set
+        # HIP_VISIBLE_DEVICES directly per iteration (one device at a time)
+        # instead of re-running detection per iteration, which would otherwise
+        # be corrupted by the env-var we just set (see issue #4889).
+        for arch, device_idx in unique_devices.items():
+            os.environ["HIP_VISIBLE_DEVICES"] = str(device_idx)
 
             print(f"\n{'='*60}")
             print(f"Running smoke tests on device {device_idx} ({arch})")
+            print(f"HIP_VISIBLE_DEVICES={os.environ['HIP_VISIBLE_DEVICES']}")
             print(f"{'='*60}")
 
             retcode = pytest.main(pytest_args)
