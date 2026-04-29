@@ -67,8 +67,104 @@ permissions:
 run-name: Test PyTorch (${{ inputs.amdgpu_family }}, ${{ inputs.torch_version}}, ${{ inputs.test_runs_on }})
 
 jobs:
+  # Defuses https://github.com/ROCm/TheRock/issues/4926.
+  #
+  # On self-hosted Linux runners that use a `container:` block, the actions
+  # runner calls `docker network create github_network_<id>` for every job.
+  # If a previous job left behind orphan containers / networks (e.g. because a
+  # containerd-shim got stuck and `docker rm --force` reports
+  # "could not kill container: tried to kill container, but did not receive an
+  # exit event"), each leaked network keeps a /16 from Docker's default address
+  # pool. Once ~30 of those leak the pool is exhausted and the next job fails
+  # with: `Error response from daemon: all predefined address pools have been
+  # fully subnetted` followed by `Value cannot be null. (Parameter 'network')`.
+  #
+  # This pre-job runs on the same runner label *without* a `container:` block,
+  # so it executes on the host before the runner attempts the failing
+  # `docker network create`. It removes orphan containers and prunes networks
+  # from previous jobs, reclaiming address-pool space.
+  prepare_runner:
+    name: Prepare runner | ${{ inputs.amdgpu_family }}
+    runs-on: ${{ inputs.test_runs_on }}
+    if: ${{ contains(inputs.test_runs_on, 'linux') }}
+    timeout-minutes: 5
+    steps:
+      - name: Reclaim Docker address pool from orphan containers/networks
+        shell: bash
+        run: |
+          set -u
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "docker not present on runner host; nothing to clean."
+            exit 0
+          fi
+          if ! docker info >/dev/null 2>&1; then
+            echo "docker daemon unreachable from runner; skipping cleanup."
+            exit 0
+          fi
+
+          echo "::group::Docker state before cleanup"
+          docker ps -a --format 'table {{.ID}}\t{{.Names}}\t{{.Status}}' || true
+          docker network ls || true
+          echo "::endgroup::"
+
+          # 1. Remove exited / created / dead containers that hold network
+          #    endpoints. (Running containers are left alone.)
+          stale_containers=$(docker ps -a \
+            --filter status=exited \
+            --filter status=created \
+            --filter status=dead -q || true)
+          if [ -n "${stale_containers}" ]; then
+            echo "Removing stale containers:"
+            echo "${stale_containers}"
+            docker rm -f ${stale_containers} || true
+          fi
+
+          # 2. Prune unused networks.
+          docker network prune --force || true
+
+          # 3. Belt-and-braces: explicitly remove anything still named like a
+          #    GHA job network. These are what consume the default address
+          #    pool when leaked.
+          gha_nets=$(docker network ls --format '{{.Name}}' \
+            | grep -E '^github_network_' || true)
+          if [ -n "${gha_nets}" ]; then
+            echo "Removing leftover GHA job networks:"
+            echo "${gha_nets}"
+            echo "${gha_nets}" | xargs -r -n1 docker network rm || true
+          fi
+
+          echo "::group::Docker state after cleanup"
+          docker ps -a --format 'table {{.ID}}\t{{.Names}}\t{{.Status}}' || true
+          docker network ls || true
+          echo "::endgroup::"
+
+          # 4. Probe the address pool by creating and removing a throwaway
+          #    network. If this fails, the pool is exhausted by something we
+          #    cannot remove (typically an unkillable container holding a
+          #    network) and the host needs operator intervention.
+          probe="therock_pool_probe_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          if ! docker network create "${probe}" >/dev/null 2>err.log; then
+            echo "::error::Docker address pool exhausted on this runner."
+            echo "::error::docker network create failed: $(cat err.log)"
+            echo "::error::Stale containers (often a wedged containerd-shim)"
+            echo "::error::are holding bridge networks that cannot be removed."
+            echo "::error::Operator action required on the runner host:"
+            echo "::error::  sudo systemctl restart docker"
+            echo "::error::See ROCm/TheRock issue #4926 for context."
+            cat err.log || true
+            exit 1
+          fi
+          docker network rm "${probe}" >/dev/null || true
+          echo "Address pool probe OK."
+
   test_wheels:
     name: Test PyTorch | ${{ inputs.amdgpu_family }}
+    needs: [prepare_runner]
+    # Proceed when prepare_runner succeeded *or* was skipped (non-linux
+    # runners). Do not proceed when it failed: that means the runner host is
+    # unhealthy and the GHA `docker network create` step would just emit the
+    # cryptic "Value cannot be null. (Parameter 'network')" error.
+    if: ${{ always() && (needs.prepare_runner.result == 'success' || needs.prepare_runner.result == 'skipped') }}
     runs-on: ${{ inputs.test_runs_on }}
     container:
       image: ${{ contains(inputs.test_runs_on, 'linux') && 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:405945a40deaff9db90b9839c0f41d4cba4a383c1a7459b28627047bf6302a26' || null }}
