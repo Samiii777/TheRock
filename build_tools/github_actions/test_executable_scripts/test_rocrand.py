@@ -10,6 +10,7 @@ from pathlib import Path
 THEROCK_BIN_DIR = os.getenv("THEROCK_BIN_DIR")
 SCRIPT_DIR = Path(__file__).resolve().parent
 THEROCK_DIR = SCRIPT_DIR.parent.parent.parent
+AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES", "")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -82,13 +83,19 @@ QUICK_TESTS = [
     "-*basic_tests/rocrand_basic_tests.rocrand_create_destroy_generator_test/10*",
 ]
 
+# Issue #5047: gfx1151 segfaults under high parallelism (UMA APU memory pressure
+# plus repeated queue create/destroy hitting ROCR-Runtime queue scratch race).
+ctest_parallelism = "8"
+if AMDGPU_FAMILIES == "gfx1151":
+    ctest_parallelism = "1"
+
 cmd = [
     "ctest",
     "--test-dir",
     f"{THEROCK_BIN_DIR}/rocRAND",
     "--output-on-failure",
     "--parallel",
-    "8",
+    ctest_parallelism,
     "--repeat",
     "until-pass:3",
 ]

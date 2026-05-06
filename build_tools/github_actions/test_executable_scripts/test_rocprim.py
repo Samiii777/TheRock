@@ -102,13 +102,20 @@ shard_index = int(os.getenv("SHARD_INDEX", "1")) - 1
 total_shards = int(os.getenv("TOTAL_SHARDS", "1"))
 
 
+# Issue #5047: gfx1151 (Strix Halo) is a UMA APU that shares system RAM with the GPU.
+# At --parallel 8 we observed 30.9 / 31 GB host memory usage and OOM kills (exit 137)
+# in CI nightlies. Drop to 1 on gfx1151 until we can profile and raise it safely.
+ctest_parallelism = "8"
+if AMDGPU_FAMILIES == "gfx1151":
+    ctest_parallelism = "1"
+
 cmd = [
     "ctest",
     "--test-dir",
     f"{THEROCK_BIN_DIR}/rocprim",
     "--output-on-failure",
     "--parallel",
-    "8",
+    ctest_parallelism,
     "--repeat",
     "until-pass:6",
     # shards the tests by running a specific set of tests based on starting test (shard_index) and stride (total_shards)

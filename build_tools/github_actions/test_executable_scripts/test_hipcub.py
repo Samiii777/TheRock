@@ -11,6 +11,7 @@ from pathlib import Path
 THEROCK_BIN_DIR = os.getenv("THEROCK_BIN_DIR")
 SCRIPT_DIR = Path(__file__).resolve().parent
 THEROCK_DIR = SCRIPT_DIR.parent.parent.parent
+AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES", "")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -93,6 +94,12 @@ res_gen_cmd = [
 logging.info(f"++ Exec [{THEROCK_DIR}]$ {shlex.join(res_gen_cmd)}")
 subprocess.run(res_gen_cmd, cwd=THEROCK_DIR, check=True, env=env_vars)
 
+# Issue #5047: gfx1151 (Strix Halo) is a UMA APU sharing system RAM with the GPU.
+# At --parallel 8 hipCUB tests overran the runner (15m timeout-on-retry observed).
+ctest_parallelism = "8"
+if AMDGPU_FAMILIES == "gfx1151":
+    ctest_parallelism = "1"
+
 # Run ctest with resource spec file
 cmd = [
     "ctest",
@@ -100,7 +107,7 @@ cmd = [
     f"{THEROCK_BIN_DIR}/hipcub",
     "--output-on-failure",
     "--parallel",
-    "8",
+    ctest_parallelism,
     "--resource-spec-file",
     resource_spec_file,
 ]
