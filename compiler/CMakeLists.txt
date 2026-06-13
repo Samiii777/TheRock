@@ -37,6 +37,27 @@ if(THEROCK_ENABLE_COMPILER)
      message(WARNING "LLVM parallel link jobs is unlimited. Memory usage may be much higher. Set -DLLVM_PARALLEL_LINK_JOBS to reduce memory use.")
   endif()
 
+  # LLVM compilation is also memory intensive. The LLVM sub-build runs its own
+  # Ninja invocation that does not inherit the top-level `-j` flag, so by default
+  # it compiles with unlimited parallelism and can OOM-kill the build on systems
+  # with many cores relative to RAM. Forward LLVM_RAM_PER_COMPILE_JOB (RAM-based
+  # auto-detection, preferred) and/or LLVM_PARALLEL_COMPILE_JOBS (hard cap) into
+  # the sub-build. If LLVM_RAM_PER_COMPILE_JOB is set, LLVM auto-computes the job
+  # count from available physical memory and it takes precedence.
+  if(LLVM_RAM_PER_COMPILE_JOB)
+    message(STATUS "LLVM compile jobs auto-limited by RAM: ${LLVM_RAM_PER_COMPILE_JOB} bytes per job")
+    list(APPEND _extra_llvm_cmake_args "-DLLVM_RAM_PER_COMPILE_JOB=${LLVM_RAM_PER_COMPILE_JOB}")
+    if(LLVM_PARALLEL_COMPILE_JOBS)
+      message(STATUS "LLVM parallel compile jobs also set to ${LLVM_PARALLEL_COMPILE_JOBS} (LLVM_RAM_PER_COMPILE_JOB takes precedence when both are set)")
+      list(APPEND _extra_llvm_cmake_args "-DLLVM_PARALLEL_COMPILE_JOBS=${LLVM_PARALLEL_COMPILE_JOBS}")
+    endif()
+  elseif(LLVM_PARALLEL_COMPILE_JOBS)
+    message(STATUS "LLVM parallel compile jobs set to ${LLVM_PARALLEL_COMPILE_JOBS}")
+    list(APPEND _extra_llvm_cmake_args "-DLLVM_PARALLEL_COMPILE_JOBS=${LLVM_PARALLEL_COMPILE_JOBS}")
+  else()
+     message(WARNING "LLVM parallel compile jobs is unlimited. Memory usage may be much higher and the build may be OOM-killed on systems with many cores relative to RAM. Set -DLLVM_RAM_PER_COMPILE_JOB (e.g. 4000000000 for ~4GB/job) or -DLLVM_PARALLEL_COMPILE_JOBS to reduce memory use.")
+  endif()
+
   # If the compiler is not pristine (i.e. has patches), then there will be a
   # ".amd-llvm.smrev" file present which must be used instead of the auto
   # computed git revision. If present, this will have a stable hash of

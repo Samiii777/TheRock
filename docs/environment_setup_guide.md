@@ -222,7 +222,7 @@ ROCm is a very resource hungry project to build. The `compiler/amd-llvm` compone
 
 #### Controlling Build Parallelism
 
-The most effective way to bound memory usage is to cap the number of concurrent build jobs. Note that `-j` passed to the outer Ninja/CMake invocation controls parallelism at the super-project level; subproject builds (e.g., `amd-llvm`) spawn their own Ninja instances and are not directly bounded by this setting. See [TheRock issue #XXXX](https://github.com/ROCm/TheRock/issues) for tracking a Ninja job server that would propagate limits into subprojects.
+The most effective way to bound memory usage is to cap the number of concurrent build jobs. Note that `-j` passed to the outer Ninja/CMake invocation controls parallelism at the super-project level; subproject builds (e.g., `amd-llvm`) spawn their own Ninja instances and are **not** bounded by this outer `-j`. For the LLVM sub-build specifically, use the dedicated CMake options described in [Bounding the LLVM sub-build](#bounding-the-llvm-sub-build) below.
 
 1. **Per-invocation via `ninja -j`:**
 
@@ -260,6 +260,45 @@ The most effective way to bound memory usage is to cap the number of concurrent 
 | 64 GB+ | any   | `-j16` or higher | Link jobs still peak at ~8 GB each   |
 
 If you observe OOM kills during the `amd-llvm` build, drop `-j` further. The OOM typically manifests as `ninja: build stopped: subcommand failed` with no compiler error — check `dmesg | tail -50` for `Out of memory: Killed process` entries.
+
+#### Bounding the LLVM sub-build
+
+The `compiler/amd-llvm` component is built by its own nested CMake + Ninja
+invocation that does **not** inherit the outer `-j`. By default it compiles with
+unlimited parallelism (one job per logical core), and because individual LLVM
+compile units can use several GB of RSS, this is the most common cause of OOM
+kills on systems with many cores relative to RAM (e.g. a 20-thread CPU with
+32 GB). TheRock exposes two top-level CMake options that are forwarded into the
+LLVM sub-build to bound its **compile** concurrency:
+
+| Option                       | Effect                                                                                       |
+| ---------------------------- | -------------------------------------------------------------------------------------------- |
+| `LLVM_RAM_PER_COMPILE_JOB`   | Auto-computes the compile job count from available physical memory (bytes per job). Preferred. |
+| `LLVM_PARALLEL_COMPILE_JOBS` | Hard cap on the number of parallel compile jobs.                                              |
+| `LLVM_PARALLEL_LINK_JOBS`    | Hard cap on the number of parallel link jobs (link steps are the heaviest, ~4-8 GB each).     |
+
+`LLVM_RAM_PER_COMPILE_JOB` is the most robust choice because it adapts to the
+machine: LLVM divides the detected available RAM by this value and caps the
+compile pool accordingly. If both `LLVM_RAM_PER_COMPILE_JOB` and
+`LLVM_PARALLEL_COMPILE_JOBS` are set, the RAM-based limit takes precedence.
+
+```bash
+# Recommended for memory-constrained machines: ~4 GB per LLVM compile job,
+# and cap link jobs separately (link is the heaviest phase).
+cmake -B build -GNinja \
+  -DLLVM_RAM_PER_COMPILE_JOB=4000000000 \
+  -DLLVM_PARALLEL_LINK_JOBS=2 \
+  ...
+
+# Or set a hard compile-job cap instead of the RAM-based heuristic:
+cmake -B build -GNinja \
+  -DLLVM_PARALLEL_COMPILE_JOBS=6 \
+  -DLLVM_PARALLEL_LINK_JOBS=2 \
+  ...
+```
+
+If you leave these unset, the configure step prints a warning that LLVM compile
+(and link) parallelism is unlimited.
 
 #### Using ccache to reduce rebuild times
 
