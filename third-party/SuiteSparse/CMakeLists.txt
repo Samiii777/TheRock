@@ -31,6 +31,25 @@ therock_cmake_subproject_declare(therock-SuiteSparse
     -DSUITESPARSE_USE_CUDA=OFF
     -DSUITESPARSE_USE_OPENMP=OFF
     -DSUITESPARSE_USE_FORTRAN=OFF
+    # Do not build the SuiteSparse demo/test executables. They are leaf test
+    # binaries that are not part of the ROCm distribution and only serve to
+    # exercise the libraries during SuiteSparse's own build. In SuiteSparse
+    # they are gated by `if (SUITESPARSE_DEMOS OR BUILD_TESTING)` (see
+    # CHOLMOD/CMakeLists.txt), so BUILD_TESTING=OFF (in addition to the
+    # already-default SUITESPARSE_DEMOS=OFF) is required to skip them. They
+    # were the first targets to surface the latent missing-link bug below
+    # under the stricter amd-llvm/lld linker.
+    -DSUITESPARSE_DEMOS=OFF
+    -DBUILD_TESTING=OFF
+    # libsuitesparseconfig.so (and the other SuiteSparse libs) call hypot()
+    # from libm, but SuiteSparse's build system never links -lm. The GNU
+    # linker (ld.bfd) silently resolves this transitively, but lld (used by
+    # the amd-llvm toolchain) defaults to --no-allow-shlib-undefined and
+    # rejects the undefined `hypot` reference, breaking the ASan build.
+    # Explicitly link -lm so the SuiteSparse shared libraries declare their
+    # libm dependency.
+    "-DCMAKE_SHARED_LINKER_FLAGS=-lm"
+    "-DCMAKE_EXE_LINKER_FLAGS=-lm"
   RUNTIME_DEPS
     therock-host-blas
 )
