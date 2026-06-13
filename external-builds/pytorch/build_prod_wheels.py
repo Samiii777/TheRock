@@ -959,6 +959,24 @@ def do_build_pytorch(
         for arch in rocm_arch_list
     )
 
+    # gfx1250 is not yet supported by PyTorch's Composable Kernel (CK)
+    # based SDPA/GEMM backends, so those must be turned off for it to build
+    # functionally. This is a temporary measure until the CK enablement
+    # lands upstream in PyTorch (tracked by
+    # https://github.com/ROCm/TheRock/issues/5833).
+    #
+    # We disable CK SDPA/GEMM only when *every* target arch is one of these
+    # unsupported arches. Multi-arch builds that also include a CK-supported
+    # arch keep CK enabled. Flash attention itself stays on for gfx1250
+    # because it is a gfx12* arch already covered by aotriton and builds
+    # fine; only the CK SDPA/GEMM paths break the build.
+    CK_SDPA_GEMM_UNSUPPORTED_ARCH_PREFIXES = ("gfx1250",)
+    has_ck_sdpa_gemm_supported_arch = any(
+        not arch.startswith(CK_SDPA_GEMM_UNSUPPORTED_ARCH_PREFIXES)
+        for arch in rocm_arch_list
+        if arch
+    )
+
     ## Enable FBGEMM_GENAI on Linux for PyTorch, as it is available only for 2.9 on rocm/pytorch
     ## and causes build failures for other PyTorch versions
     ## Warn user when enabling it manually.
@@ -1024,6 +1042,19 @@ def do_build_pytorch(
         print(
             f"Flash Attention and Memory efficiency enabled: {env['USE_FLASH_ATTENTION'] == 'ON'}"
         )
+
+        # Disable PyTorch's Composable Kernel (CK) SDPA/GEMM backends when no
+        # target arch supports them (currently gfx1250). Without this, the CK
+        # SDPA/GEMM sources fail to build for gfx1250-only wheels. See
+        # https://github.com/ROCm/TheRock/issues/5833.
+        use_ck_sdpa_gemm = "ON" if has_ck_sdpa_gemm_supported_arch else "OFF"
+        env.update(
+            {
+                "USE_ROCM_CK_SDPA": use_ck_sdpa_gemm,
+                "USE_ROCM_CK_GEMM": use_ck_sdpa_gemm,
+            }
+        )
+        print(f"ROCm CK SDPA/GEMM enabled: {use_ck_sdpa_gemm == 'ON'}")
 
     env["USE_ROCM"] = "ON"
     env["USE_CUDA"] = "OFF"
