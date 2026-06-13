@@ -136,6 +136,39 @@ below for guidance — `-j8` is a safe starting point on a 32 GB system.
 
 ## Common Issues
 
+### amd-llvm: `fatal error: quadmath.h: No such file or directory`
+
+The `amd-llvm` sub-project builds the `flang` Fortran runtimes, including
+`FortranFloat128Math`, which requires the 128-bit float header `quadmath.h`.
+On Debian/Ubuntu this header is provided **only** by the `libgcc-<N>-dev`
+package (for example `libgcc-13-dev` ships
+`/usr/lib/gcc/x86_64-linux-gnu/13/include/quadmath.h`). If it is missing, the
+`runtimes-amdgcn-amd-amdhsa` configure/build step fails with:
+
+```
+fatal error: quadmath.h: No such file or directory
+```
+
+**Fix:** install the `libgcc-<N>-dev` package that matches the GCC version
+the compiler selects:
+
+```bash
+sudo apt install libgcc-13-dev   # or libgcc-14-dev, etc.
+```
+
+If you have **more than one** GCC toolchain installed (e.g. both GCC 13 and
+GCC 14), Clang may select a newer one whose `-dev` package is not installed.
+Watch the build log for a line such as:
+
+```
+clang++: warning: ... '/usr/lib/gcc/x86_64-linux-gnu/14' would be chosen over
+'/usr/lib/gcc/x86_64-linux-gnu/13' [-Wgcc-install-dir-libstdcxx]
+```
+
+and install the `libgcc-<N>-dev` package for the version that "would be
+chosen" (`libgcc-14-dev` in that example). See
+[TheRock issue #5327](https://github.com/ROCm/TheRock/issues/5327).
+
 ### CMake
 
 Different project components enforce different CMake version ranges. The `cmake_minimum_version` in the top level CMake file (presently 3.25) should be considered the project wide minimum. As of September 2025, CMake 4 is supported on Linux - but not on Windows.
