@@ -125,7 +125,18 @@ class ROCmCoreTest(unittest.TestCase):
                 # etc).
                 command = "import ctypes; import sys; ctypes.CDLL(sys.argv[1])"
                 cmd = [sys.executable, "-c", command, str(so_path)]
-                subprocess.check_call(cmd)
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    self.fail(
+                        utils.format_shared_library_load_error(
+                            so_path, result.stderr
+                        )
+                    )
 
     def testConsoleScripts(self):
         for script_name, cl, expected_text, required in CONSOLE_SCRIPT_TESTS:

@@ -18,6 +18,38 @@ the build topology):
 
 The rest of this document covers the sysdeps in detail.
 
+## Required system libraries (not bundled)
+
+Most operating-system libraries that ROCm needs are built from source and bundled
+as [sysdeps](#sysdeps). A small number of low-level runtime libraries are *not*
+bundled and must be provided by the host distribution. The most notable is
+**`libatomic`** (`libatomic.so.1`), a GCC runtime support library that several
+ROCm shared libraries (for example `librocprofiler-sdk.so.1`,
+`libhsa-runtime64.so.1` and `libamdhip64.so`) link against via a `NEEDED` entry.
+
+On many full desktop/server images `libatomic` is already present, but minimal
+container images (for example minimal RHEL/UBI or slim Ubuntu images) often do
+not include it. When it is missing, command-line tools such as `rocminfo` may
+still work, but loading the ROCm Python packages (for example
+`python -m rocm_sdk test`) fails with:
+
+```
+OSError: libatomic.so.1: cannot open shared object file: No such file or directory
+```
+
+Install it with the package for your distribution:
+
+| Distribution                          | Command                              |
+| ------------------------------------- | ------------------------------------ |
+| Debian / Ubuntu                       | `sudo apt-get install libatomic1`    |
+| RHEL / AlmaLinux / Fedora / Azure Linux | `sudo dnf install libatomic`       |
+| SLES / openSUSE                       | `sudo zypper install libatomic1`     |
+
+The [`dockerfiles/install_rocm_deps.sh`](/dockerfiles/install_rocm_deps.sh)
+helper installs this (and the other expected system packages) automatically for
+the supported distributions.
+
+
 ## Sysdeps
 
 The ROCm projects have a number of dependencies. Typically those that escape
