@@ -50,6 +50,7 @@ case "$DISTRO" in
             curl \
             gpg \
             build-essential \
+            libatomic1 \
             libelf1 \
             libnuma1 \
             libunwind8 \

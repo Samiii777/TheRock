@@ -60,6 +60,43 @@ CONSOLE_SCRIPT_TESTS = COMMON_CONSOLE_SCRIPT_TESTS + (
 )
 
 
+# System (non-bundled) runtime libraries that ROCm shared objects link against
+# but that TheRock does not vendor. If one of these is missing, dlopen fails
+# with "cannot open shared object file" and the user must install the system
+# package. Map the SONAME to a hint about which package provides it so the test
+# can emit an actionable message instead of a bare traceback.
+# See dockerfiles/install_rocm_deps.sh and docs/development/dependencies.md.
+_SYSTEM_LIBRARY_PACKAGE_HINTS = {
+    "libatomic.so.1": (
+        "libatomic (provided by the C/C++ runtime). "
+        "Install it with one of: "
+        "`apt-get install libatomic1` (Debian/Ubuntu), "
+        "`dnf install libatomic` (RHEL/AlmaLinux/Azure Linux), or "
+        "`zypper install libatomic1` (SLES)."
+    ),
+}
+
+
+def _format_shared_library_load_failure(so_path, output: str) -> str:
+    """Builds an actionable failure message for a shared library that failed
+    to load.
+
+    If the failure is caused by a missing *system* shared object (e.g.
+    libatomic.so.1 is not installed), the message names the missing library and
+    the package that provides it. Otherwise the raw loader output is returned.
+    """
+    for soname, hint in _SYSTEM_LIBRARY_PACKAGE_HINTS.items():
+        if f"{soname}: cannot open shared object file" in output:
+            return (
+                f"Failed to load {so_path}: missing system library {soname}.\n"
+                f"This library is a runtime dependency that TheRock does not "
+                f"bundle; it must be installed from your OS distribution.\n"
+                f"To resolve: install {hint}\n\n"
+                f"Loader output:\n{output}"
+            )
+    return f"Failed to load shared library {so_path}:\n{output}"
+
+
 class ROCmCoreTest(unittest.TestCase):
     def testInstallationLayout(self):
         """The `rocm_sdk` and core module must be siblings on disk."""
@@ -125,7 +162,18 @@ class ROCmCoreTest(unittest.TestCase):
                 # etc).
                 command = "import ctypes; import sys; ctypes.CDLL(sys.argv[1])"
                 cmd = [sys.executable, "-c", command, str(so_path)]
-                subprocess.check_call(cmd)
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                if result.returncode != 0:
+                    output = result.stdout.decode(
+                        locale.getpreferredencoding(), errors="replace"
+                    )
+                    self.fail(
+                        _format_shared_library_load_failure(so_path, output)
+                    )
 
     def testConsoleScripts(self):
         for script_name, cl, expected_text, required in CONSOLE_SCRIPT_TESTS:

@@ -240,3 +240,31 @@ Note: `libmount` links `libblkid` transitively, so consumers that only use
   `zstd::libzstd_shared` (SHARED IMPORTED). The INTERFACE target forwards to the
   appropriate concrete target, abstracting static vs shared selection. Prefer
   `zstd::libzstd` for new code.
+
+## Non-bundled Runtime System Dependencies
+
+Some shared libraries shipped in the ROCm Python wheels / portable
+distribution link against system runtime libraries that TheRock does **not**
+bundle as sysdeps. These must be provided by the host OS. The most common
+example is `libatomic`:
+
+- `libatomic.so.1` is part of the GCC/C++ runtime (libgcc). Several ROCm
+  libraries (for example `librocprofiler-sdk.so.1` and
+  `librocprofiler-sdk-roctx.so.1`) have a `NEEDED` entry for it. It is not
+  vendored under `lib/rocm_sysdeps`, so if it is absent, loading those
+  libraries fails with
+  `libatomic.so.1: cannot open shared object file: No such file or directory`
+  (this is why `rocm-sdk test` can fail while `rocminfo`, which does not link
+  `libatomic`, still works).
+
+Install it with the package manager for your distribution:
+
+| Distribution            | Package      | Command                          |
+| ----------------------- | ------------ | -------------------------------- |
+| Debian / Ubuntu         | `libatomic1` | `apt-get install libatomic1`     |
+| RHEL / AlmaLinux        | `libatomic`  | `dnf install libatomic`          |
+| Azure Linux             | `libatomic`  | `tdnf install libatomic`         |
+| SLES                    | `libatomic1` | `zypper install libatomic1`      |
+
+These packages are installed automatically by
+[`dockerfiles/install_rocm_deps.sh`](/dockerfiles/install_rocm_deps.sh).
