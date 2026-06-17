@@ -40,6 +40,11 @@ PYTORCH_REFS_LINUX: list[dict] = [
     },
     {
         "pytorch_git_ref": "release/2.11",
+        # gfx125x not yet upstreamed to pytorch/pytorch; release/2.11's vendored
+        # Composable Kernel does not support gfx1250 (CK_BUFFER_RESOURCE_3RD_DWORD
+        # is undefined for that arch).
+        # See https://github.com/ROCm/TheRock/issues/5833.
+        "exclude_amdgpu_families": {"gfx125x"},
     },
     {
         "pytorch_git_ref": "release/2.12",
