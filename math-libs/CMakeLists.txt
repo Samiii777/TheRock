@@ -471,25 +471,28 @@ endif()
 # from the CK subproject's GPU_TARGETS at activate time. If no targets remain
 # after that filter (e.g. a single-arch shard for a CK-unsupported arch),
 # declaring CK with an empty GPU_TARGETS list breaks CK's own HIP try-compile
-# with "HIP_ARCHITECTURES is empty", so flip the global gate off here and let
-# MIOpen build with MIOPEN_USE_COMPOSABLEKERNEL=OFF.
+# with "HIP_ARCHITECTURES is empty". THEROCK_ENABLE_COMPOSABLE_KERNEL is the
+# single source of truth for whether CK builds, so when no CK-supported target
+# remains for this build, flip THEROCK_ENABLE_COMPOSABLE_KERNEL off here. Both
+# this directory and ml-libs (MIOpen, configured after math-libs) then observe
+# the same resolved value, and MIOpen builds with MIOPEN_USE_COMPOSABLEKERNEL=OFF.
 # See https://github.com/ROCm/TheRock/issues/4836
-set(_ck_enabled ${THEROCK_ENABLE_COMPOSABLE_KERNEL})
-if(_ck_enabled)
+# See https://github.com/ROCm/TheRock/issues/6035
+if(THEROCK_ENABLE_COMPOSABLE_KERNEL)
   therock_filter_amdgpu_targets(_ck_targets composable_kernel ${THEROCK_AMDGPU_TARGETS})
   if(NOT _ck_targets)
     message(STATUS
       "composable_kernel: no supported gfx targets remain after filtering "
-      "(THEROCK_AMDGPU_TARGETS='${THEROCK_AMDGPU_TARGETS}'); skipping subproject.")
-    set(_ck_enabled OFF)
+      "(THEROCK_AMDGPU_TARGETS='${THEROCK_AMDGPU_TARGETS}'); disabling "
+      "THEROCK_ENABLE_COMPOSABLE_KERNEL and skipping subproject.")
+    set(THEROCK_ENABLE_COMPOSABLE_KERNEL OFF CACHE BOOL
+      "Enable building of composable_kernel" FORCE)
+    set(THEROCK_ENABLE_COMPOSABLE_KERNEL OFF)
+    set(THEROCK_ENABLE_COMPOSABLE_KERNEL OFF PARENT_SCOPE)
   endif()
 endif()
-# composable_kernel now lives in math-libs but MIOpen (in ml-libs) gates its CK
-# usage on _ck_enabled. math-libs is configured before ml-libs, so push the
-# resolved value to the parent scope where ml-libs will inherit it.
-set(_ck_enabled ${_ck_enabled} PARENT_SCOPE)
 
-if(_ck_enabled)
+if(THEROCK_ENABLE_COMPOSABLE_KERNEL)
   ##############################################################################
   # Composable_kernel
   ##############################################################################

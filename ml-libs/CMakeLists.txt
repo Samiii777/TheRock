@@ -9,12 +9,13 @@ if(THEROCK_FLAG_INCLUDE_PROFILER)
 endif()
 
 if(THEROCK_ENABLE_MIOPEN)
-  # MIOpen's CK use is gated on both the per-arch CK availability
-  # (math-libs/CMakeLists.txt) and the user-facing
-  # THEROCK_MIOPEN_USE_COMPOSABLE_KERNEL opt-out, which lets
-  # someone build CK for other consumers while keeping it out of MIOpen.
+  # MIOpen's CK use is gated on both whether CK is enabled at all
+  # (THEROCK_ENABLE_COMPOSABLE_KERNEL is the single source of truth, resolved in
+  # math-libs/CMakeLists.txt) and the user-facing THEROCK_MIOPEN_USE_COMPOSABLE_KERNEL
+  # toggle, which lets someone build CK for other consumers while keeping it out
+  # of MIOpen.
   set(_miopen_use_ck OFF)
-  if(_ck_enabled AND THEROCK_MIOPEN_USE_COMPOSABLE_KERNEL)
+  if(THEROCK_ENABLE_COMPOSABLE_KERNEL AND THEROCK_MIOPEN_USE_COMPOSABLE_KERNEL)
     set(_miopen_use_ck ON)
   endif()
 
