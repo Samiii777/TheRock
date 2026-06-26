@@ -259,6 +259,9 @@ def _run_kpack_split(
         addl_artifact_names=[
             "prim",
             "rocwmma",
+            # libhipcxx is a header-only library (dev component only), so it is
+            # not included in any runtime package; include it in devel.
+            "libhipcxx",
             "flatbuffers",
             "nlohmann-json",
             "rocshmem",
@@ -347,6 +350,9 @@ def _run_legacy(
                 # included in runtime packages, but we still want them in the devel package.
                 "prim",
                 "rocwmma",
+                # libhipcxx is a header-only library (dev component only), so it is
+                # not included in any runtime package; include it in devel.
+                "libhipcxx",
                 # Third party dependencies needed by hipDNN consumers.
                 "flatbuffers",
                 "nlohmann-json",
@@ -378,10 +384,12 @@ def core_artifact_filter(an: ArtifactName) -> bool:
         "core-ocl",
         "core-hipinfo",
         "core-runtime",
+        "elfio",
         "hipfile",
         "hipify",
         "host-blas",
         "host-suite-sparse",
+        "rdc",
         "rocdecode",
         "rocgdb",
         "rocjpeg",
