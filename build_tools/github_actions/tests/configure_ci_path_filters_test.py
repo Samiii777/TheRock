@@ -4,12 +4,17 @@
 from pathlib import Path
 import os
 import sys
+import subprocess
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 
-from configure_ci_path_filters import is_ci_run_required, _GITHUB_WORKFLOWS_CI_FILENAMES
+from configure_ci_path_filters import (
+    get_git_modified_paths,
+    is_ci_run_required,
+    _GITHUB_WORKFLOWS_CI_FILENAMES,
+)
 from workflow_utils import get_transitive_workflow_uses
 
 
@@ -88,6 +93,48 @@ class ConfigureCIPathFiltersTest(unittest.TestCase):
             )
         if errors:
             self.fail("\n".join(errors))
+
+
+class GetGitModifiedPathsTest(unittest.TestCase):
+    """Tests for get_git_modified_paths base-ref error handling (issue #6162)."""
+
+    def _raise_called_process_error(self, *args, **kwargs):
+        # Mimic `git diff --name-only <bad_ref>` failing with exit 128
+        # ("fatal: bad object"), which is what GitHub produces for a tag
+        # push (all-zeros "before" SHA) or a shallow checkout missing the
+        # base commit.
+        raise subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "diff", "--name-only", "badref"],
+        )
+
+    def test_returns_none_for_all_zeros_base_ref(self):
+        # Tag push: the GitHub event "before" SHA is all zeros.
+        with patch("subprocess.run", side_effect=self._raise_called_process_error):
+            result = get_git_modified_paths("0" * 40)
+        self.assertIsNone(result)
+
+    def test_returns_none_for_missing_base_commit(self):
+        # Rebase & merge with a shallow (depth 1) checkout: the base commit
+        # SHA is not present locally.
+        with patch("subprocess.run", side_effect=self._raise_called_process_error):
+            result = get_git_modified_paths("f5c168058a7ceaa0f179cc36784b491a11a3adc7")
+        self.assertIsNone(result)
+
+    def test_returns_none_on_timeout(self):
+        with patch("subprocess.run", side_effect=TimeoutError):
+            result = get_git_modified_paths("HEAD^1")
+        self.assertIsNone(result)
+
+    def test_returns_paths_on_success(self):
+        fake = subprocess.CompletedProcess(
+            args=["git", "diff", "--name-only", "HEAD^1"],
+            returncode=0,
+            stdout="a.py\nb/c.cpp\n",
+        )
+        with patch("subprocess.run", return_value=fake):
+            result = get_git_modified_paths("HEAD^1")
+        self.assertEqual(list(result), ["a.py", "b/c.cpp"])
 
 
 if __name__ == "__main__":

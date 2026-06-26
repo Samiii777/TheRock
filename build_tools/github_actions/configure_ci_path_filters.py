@@ -54,6 +54,22 @@ def get_git_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
             file=sys.stderr,
         )
         return None
+    except subprocess.CalledProcessError as e:
+        # `git diff` exits non-zero (typically 128, "fatal: bad object")
+        # when base_ref cannot be resolved. This happens for push events
+        # whose history is unavailable, e.g.:
+        #   - a tag push, where the event "before" SHA is all zeros, and
+        #   - a rebase & merge picked up by a shallow (depth 1) checkout
+        #     that does not contain the base commit.
+        # Treat this as "no usable diff" and fall back to running CI
+        # rather than crashing the whole configuration step.
+        print(
+            "Could not compute modified files against base ref"
+            f" '{base_ref}' (git exited {e.returncode}). Not using diff"
+            " to determine jobs to run.",
+            file=sys.stderr,
+        )
+        return None
 
 
 def get_git_submodule_paths(repo_root: Optional[str] = None) -> Optional[Iterable[str]]:
