@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+from github_actions.manifest_utils import capture, capture_optional, log
+
+
+def source_root() -> Path:
+    """
+    Determine the repo root strictly from this script's location:
+      <repo>/build_tools/generate_therock_manifest.py  ->  <repo>
+    """
+    here = Path(__file__).resolve()
+    repo_root = here.parents[1]  # .../build_tools -> repo root
+    if not (repo_root / "build_tools").exists():
+        raise RuntimeError(
+            f"Could not locate repo root at {repo_root}. "
+            "Expected this script to live under <repo>/build_tools/."
+        )
+    return repo_root
+
+
+def has_git_metadata(repo_root: Path) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def _parse_submodule_config_output(output: str):
+    submodules_by_name = {}
+
+    # Output format: submodule.<name>.<key> <value>
+    # Example: submodule.half.path base/half
+    # The regex uses (.+) for name to handle submodule names containing dots.
+    # The explicit \.(path|url|branch) ensures we match the last occurrence,
+    # correctly extracting names like "foo.bar" from "submodule.foo.bar.path".
+    pattern = re.compile(r"^submodule\.(.+)\.(path|url|branch)\s+(.+)$")
+
+    for line in output.strip().splitlines():
+        match = pattern.match(line)
+        if match:
+            name, key, value = match.groups()
+            if name not in submodules_by_name:
+                submodules_by_name[name] = {
+                    "name": name,
+                    "path": None,
+                    "url": None,
+                    "branch": None,
+                }
+            submodules_by_name[name][key] = value
+
+    # Filter out entries without a path and sort by path
+    results = [r for r in submodules_by_name.values() if r["path"]]
+    results.sort(key=lambda r: r["path"])
+    return results
+
+
+def list_submodules_from_gitmodules_at_commit(repo_dir: Path, commit: str = "HEAD"):
+    """
+    Read path/url/branch for all submodules from .gitmodules at a specific commit.
+
+    Uses `git config --blob` to parse .gitmodules directly from git's object database.
+    This approach lets git handle all config file parsing edge cases and works with any valid submodule names.
+
+    Args:
+        repo_dir: Path to the repository root.
+        commit: The commit/ref to read .gitmodules from (default: HEAD).
+                This is important when inspecting historical commits where submodules
+                may have been added or removed since.
+
+    Returns: [{name, path, url, branch}]
+
+    Raises:
+        RuntimeError: If git command fails for reasons other than missing .gitmodules.
+    """
+    cmd = [
+        "git",
+        "config",
+        "--blob",
+        f"{commit}:.gitmodules",
+        "--get-regexp",
+        r"^submodule\.",
+    ]
+    result = subprocess.run(
+        cmd, cwd=repo_dir, text=True, capture_output=True, check=False
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        # Exit code 1 with no stderr means no matches (no .gitmodules or no submodule entries)
+        # Exit code 1 with stderr means an actual error (invalid commit, etc.)
+        if stderr:
+            raise RuntimeError(f"Git command failed: {' '.join(cmd)}\n{stderr}")
+        return []
+
+    return _parse_submodule_config_output(result.stdout)
+
+
+def list_submodules_from_gitmodules_file(repo_dir: Path):
+    """
+    Read path/url/branch for all submodules from the filesystem .gitmodules file.
+
+    This is used when git metadata is not available (for example, source trees
+    created from release archives with .git removed).
+    """
+    gitmodules_path = repo_dir / ".gitmodules"
+    if not gitmodules_path.exists():
+        return []
+
+    cmd = [
+        "git",
+        "config",
+        "--file",
+        str(gitmodules_path),
+        "--get-regexp",
+        r"^submodule\.",
+    ]
+    result = subprocess.run(
+        cmd, cwd=repo_dir, text=True, capture_output=True, check=False
+    )
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if stderr:
+            raise RuntimeError(f"Git command failed: {' '.join(cmd)}\n{stderr}")
+        return []
+
+    return _parse_submodule_config_output(result.stdout)
+
+
+def submodule_pin(repo_dir: Path, commit: str, sub_path: str):
+    """
+    Read the gitlink SHA for submodule `sub_path` at `commit`.
+    Uses: git ls-tree <commit> -- <path>
+    """
+    out = capture_optional(["git", "ls-tree", commit, "--", sub_path], cwd=repo_dir)
+    if not out:
+        return None
+    # Iterate over matching entries
+    for line in out.splitlines():
+        # An example of ls-tree output:
+        # "160000 commit d777ee5b682bfabe3d4cd436fd5c7f0e0b75300e  rocm-libraries"
+        parts = line.split()
+        # Skip malformed records that don't match the expected format
+        if len(parts) >= 3 and parts[1] == "commit":
+            # The pin comes after "commit"
+            return parts[2]
+    return None
+
+
+def patches_for_submodule_by_name(repo_dir: Path, sub_name: str):
+    """
+    Return repo-relative patch file paths under:
+      patches/amd-mainline/<sub_name>/*.patch
+    """
+    base = repo_dir / "patches" / "amd-mainline" / sub_name
+    if not base.exists():
+        return []
+    return [str(p.relative_to(repo_dir)) for p in sorted(base.glob("*.patch"))]
+
+
+def rocm_version_from_package_version(rocm_package_version: str) -> str | None:
+    match = re.match(r"^(\d+\.\d+\.\d+)", rocm_package_version)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def build_manifest_schema(
+    repo_root: Path,
+    the_rock_commit: str,
+    github_job: str | None = None,
+    github_run_id: str | None = None,
+    rocm_package_version: str | None = None,
+    rocm_version: str | None = None,
+) -> dict:
+    # Enumerate submodules from .gitmodules at the specified commit.
+    entries = list_submodules_from_gitmodules_at_commit(repo_root, the_rock_commit)
+
+    # Build rows with pins (from tree) and patch lists
+    rows = []
+    for e in sorted(entries, key=lambda x: x["path"] or ""):
+        pin = submodule_pin(repo_root, the_rock_commit, e["path"])
+        rows.append(
+            {
+                "submodule_name": e["name"],
+                "submodule_path": e["path"],
+                "submodule_url": e["url"],
+                "pin_sha": pin,
+                "patches": patches_for_submodule_by_name(repo_root, e["name"]),
+            }
+        )
+
+    manifest = {
+        "the_rock_commit": the_rock_commit,
+    }
+
+    if github_job:
+        manifest["github_job"] = github_job
+
+    if github_run_id:
+        manifest["github_run_id"] = github_run_id
+
+    if rocm_package_version:
+        manifest["rocm_package_version"] = rocm_package_version
+
+    if rocm_version:
+        manifest["rocm_version"] = rocm_version
+
+    manifest["submodules"] = rows
+    return manifest
+
+
+def build_partial_manifest_schema(
+    repo_root: Path,
+    github_job: str | None = None,
+    github_run_id: str | None = None,
+    rocm_package_version: str | None = None,
+    rocm_version: str | None = None,
+) -> dict:
+    # Enumerate submodules from the filesystem .gitmodules file when git metadata
+    # is unavailable (for example, source trees with .git removed).
+    entries = list_submodules_from_gitmodules_file(repo_root)
+
+    # Build rows without pins, since gitlink SHAs are not available without git metadata.
+    rows = []
+    for e in sorted(entries, key=lambda x: x["path"] or ""):
+        rows.append(
+            {
+                "submodule_name": e["name"],
+                "submodule_path": e["path"],
+                "submodule_url": e["url"],
+                "pin_sha": None,
+                "patches": patches_for_submodule_by_name(repo_root, e["name"]),
+            }
+        )
+
+    manifest = {
+        "the_rock_commit": None,
+    }
+
+    if github_job:
+        manifest["github_job"] = github_job
+
+    if github_run_id:
+        manifest["github_run_id"] = github_run_id
+
+    if rocm_package_version:
+        manifest["rocm_package_version"] = rocm_package_version
+
+    if rocm_version:
+        manifest["rocm_version"] = rocm_version
+
+    manifest["submodules"] = rows
+    return manifest
+
+
+def write_manifest_json(out_path: Path, manifest: dict) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Generate submodule pin/patch manifest for TheRock."
+    )
+    # make --output optional with a default message and value of None
+    ap.add_argument(
+        "-o",
+        "--output",
+        help="Output JSON path (default: <repo>/therock_manifest.json)",
+        default=None,
+    )
+    ap.add_argument(
+        "--commit", help="TheRock commit/ref to inspect (default: HEAD)", default="HEAD"
+    )
+    ap.add_argument(
+        "--flag-settings",
+        help="Path to flag_settings.json to include in the manifest",
+        default=None,
+    )
+    ap.add_argument(
+        "--rocm-package-version",
+        help="ROCm package version to include in the manifest",
+        default=None,
+    )
+    args = ap.parse_args()
+
+    repo_root = source_root()
+    github_job = os.getenv("STAGE_NAME") or os.getenv("GITHUB_JOB")
+    github_run_id = os.getenv("GITHUB_RUN_ID")
+    git_available = has_git_metadata(repo_root)
+
+    rocm_version = (
+        rocm_version_from_package_version(args.rocm_package_version)
+        if args.rocm_package_version
+        else None
+    )
+
+    if git_available:
+        the_rock_commit = capture(["git", "rev-parse", args.commit], cwd=repo_root)
+        manifest = build_manifest_schema(
+            repo_root,
+            the_rock_commit,
+            github_job,
+            github_run_id,
+            args.rocm_package_version,
+            rocm_version,
+        )
+    else:
+        manifest = build_partial_manifest_schema(
+            repo_root,
+            github_job,
+            github_run_id,
+            args.rocm_package_version,
+            rocm_version,
+        )
+
+    # Merge flag settings into the manifest if provided.
+    if args.flag_settings:
+        flag_settings_path = Path(args.flag_settings)
+        if not flag_settings_path.exists():
+            raise FileNotFoundError(
+                f"Flag settings file not found: {flag_settings_path}"
+            )
+        with open(flag_settings_path, encoding="utf-8") as f:
+            manifest["flags"] = json.load(f)
+
+    # Decide output path
+    # if not provided, write to repo_root / "therock_manifest.json"
+    out_path = (
+        Path(args.output) if args.output else (repo_root / "therock_manifest.json")
+    )
+
+    # Write JSON
+    write_manifest_json(out_path, manifest)
+
+    log(str(out_path))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

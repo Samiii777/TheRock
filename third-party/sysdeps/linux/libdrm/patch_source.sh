@@ -1,0 +1,37 @@
+#!/usr/bin/bash
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+set -e
+
+SOURCE_DIR="${1:?Source directory must be given}"
+DRM_MESON_BUILD="$SOURCE_DIR/meson.build"
+AMDGPU_MESON_BUILD="$SOURCE_DIR/amdgpu/meson.build"
+echo "Patching sources..."
+
+# Replace 'drm' in library() block with 'rocm_sysdeps_drm'
+sed -i -E "/libdrm[[:space:]]*=[[:space:]]*library\(/,/\)/ s/^([[:space:]]*)'drm'[[:space:]]*,/\1'rocm_sysdeps_drm',/" "$DRM_MESON_BUILD"
+# Remove libdrm from pkg.generate block, otherwise it will add '-lrocm_sysdeps_drm to the pkgconfig file
+sed -i "/pkg\.generate\s*(/,/)/ s/\blibdrm,\s*//" "$DRM_MESON_BUILD"
+# Add libraries tag to pkg.generate block
+sed -i "/pkg\.generate\s*(/a\  libraries : ['-L\${libdir}', '-ldrm']," $DRM_MESON_BUILD
+# Replace 'drm_amdgpu' in library() block with 'rocm_sysdeps_drm_amdgpu'
+sed -i -E "/libdrm_amdgpu[[:space:]]*=[[:space:]]*library\(/,/\)/ s/^([[:space:]]*)'drm_amdgpu'[[:space:]]*,/\1'rocm_sysdeps_drm_amdgpu',/" "$AMDGPU_MESON_BUILD"
+# Remove libdrm_amdgpu from pkg.generate block, otherwise it will add '-lrocm_sysdeps_drm_amdgpu to the pkgconfig file
+sed -i "/pkg\.generate\s*(/,/)/ s/\blibdrm_amdgpu,\s*//" "$AMDGPU_MESON_BUILD"
+# Add libraries tag to pkg.generate block
+sed -i "/pkg\.generate\s*(/a\  libraries : ['-L\${libdir}', '-ldrm_amdgpu']," $AMDGPU_MESON_BUILD
+
+# Append missing device IDs to amdgpu.ids
+AMDGPU_IDS="$SOURCE_DIR/data/amdgpu.ids"
+cat >> "$AMDGPU_IDS" << 'EOF'
+7590,	C0,	AMD Radeon RX 9060 XT
+744B,	00,	AMD Radeon PRO W7900D
+75A0,	00,	AMD Instinct MI350X
+75A3,	00,	AMD Instinct MI355X
+75B0,	00,	AMD Instinct MI350X VF
+75B3,	00,	AMD Instinct MI355X VF
+75A8,	00,	AMD Instinct MI350P
+7551,	C1,	AMD Radeon AI Pro R9700S
+7551,	C8,	AMD Radeon AI Pro R9600D
+EOF

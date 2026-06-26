@@ -1,0 +1,537 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+if ("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
+    message(FATAL_ERROR "In-source builds are not allowed. Please create a separate build directory.")
+endif()
+
+cmake_minimum_required(VERSION 3.25)  # Also update in alternative_os_setup.md
+
+# Set the default build type to Release if not specified
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+project(THEROCK)
+
+cmake_policy(SET CMP0135 NEW)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(CMakeDependentOption)
+include(ExternalProject)
+include(therock_globals)
+include(therock_default_targets)
+include(therock_detect_python_versions)
+include(therock_amdgpu_targets)
+include(therock_artifacts)
+include(therock_compiler_config)
+include(therock_external_source)
+include(therock_features)
+include(therock_sanitizers)
+include(therock_subproject)
+include(therock_job_pools)
+include(therock_testing)
+
+################################################################################
+# Python is used throughout the build. Ensure it is initialized early.
+################################################################################
+
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
+
+################################################################################
+# Generate build topology targets
+################################################################################
+# Track BUILD_TOPOLOGY.toml and related files for changes to trigger reconfigure
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/BUILD_TOPOLOGY.toml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/BRANCH_CONFIG.json"
+  "${CMAKE_CURRENT_SOURCE_DIR}/build_tools/topology_to_cmake.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/build_tools/_therock_utils/build_topology.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/build_tools/_therock_utils/branch_config.py"
+)
+
+block(SCOPE_FOR VARIABLES)
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/cmake")
+  execute_process(
+    COMMAND ${Python3_EXECUTABLE}
+      "${CMAKE_CURRENT_SOURCE_DIR}/build_tools/topology_to_cmake.py"
+      "--topology" "${CMAKE_CURRENT_SOURCE_DIR}/BUILD_TOPOLOGY.toml"
+      "--branch-config" "${CMAKE_CURRENT_SOURCE_DIR}/BRANCH_CONFIG.json"
+      "--output" "${CMAKE_CURRENT_BINARY_DIR}/cmake/therock_topology.cmake"
+      "--branch-config-output" "${CMAKE_CURRENT_BINARY_DIR}/cmake/therock_branch_config.cmake"
+    OUTPUT_VARIABLE _topology_output
+    COMMAND_ERROR_IS_FATAL ANY  # Fail on any error
+  )
+  message(STATUS "Generated build topology targets from BUILD_TOPOLOGY.toml")
+endblock()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/FLAGS.cmake")
+
+################################################################################
+# Notices
+# If there are ongoing issues for specific configurations log them here.
+################################################################################
+
+#   message(WARNING
+#     "*************************************************\n"
+#     ".."
+#     " The last known good commit on {Windows,Linux} is"
+#     " https://github.com/ROCm/TheRock/commit/{HASH}"
+#     " See https://github.com/ROCm/TheRock/issues/{ISSUE} for details.\n"
+#     "*************************************************")
+
+################################################################################
+# Testing Setup
+# Does normal CMake setup so that BUILD_TESTING functions as a master control
+# switch. Then we set THEROCK_BUILD_TESTING if not explicitly set by the user
+# based on the advice here:
+#   https://cliutils.gitlab.io/modern-cmake/chapters/testing.html
+# THEROCK_BUILD_TESTING is used to condition inclusion of testing binaries, etc.
+################################################################################
+
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+  include(CTest)
+endif()
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND NOT DEFINED THEROCK_BUILD_TESTING)
+  set(THEROCK_BUILD_TESTING ${BUILD_TESTING})
+endif()
+if(THEROCK_BUILD_TESTING)
+  message(STATUS "Enabling building tests")
+  therock_add_convenience_target(build-tests)
+endif()
+
+################################################################################
+# Options
+################################################################################
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+set(THEROCK_BACKGROUND_BUILD_JOBS "0" CACHE STRING "Number of jobs to reserve for projects marked for background building (empty=auto or a number)")
+
+set(THEROCK_PACKAGE_VERSION "git" CACHE STRING "Sets the package version string")
+# Disable compatibility symlinks created in default ROCM cmake project wide
+set(ROCM_SYMLINK_LIBS OFF)
+
+option(THEROCK_BUNDLE_SYSDEPS "Builds bundled system deps for portable builds into lib/rocm_sysdeps" ON)
+
+# TODO: Set default to true for Linux branch after necessary changes land
+cmake_dependent_option(THEROCK_ENABLE_MPI
+  "Enables building components with Message Passing Interface (MPI) support"
+  OFF "NOT WIN32" OFF)
+
+option(THEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY
+  "Builds composable_kernel with only the targets required for MIOpen"
+  OFF)
+
+option(THEROCK_BUILD_LLVM_TOOLS "Enables building all LLVM tools (not just minimum required)" OFF)
+option(THEROCK_BUILD_LLVM_TESTS "Enables building LLVM LIT tests" OFF)
+option(THEROCK_ENABLE_HOTSWAP "Enables the comgr hotswap transpiler/tool and loads it in the runtime via HSA_TOOLS_LIB" ON)
+
+set(THEROCK_SANITIZER "" CACHE STRING "Enable project wide sanitizer build ('ASAN' for host+device, 'HOST_ASAN' for host-only)")
+
+# Options to control the concurrency for building LLVM.
+set(FLANG_PARALLEL_COMPILE_JOBS "" CACHE STRING "Limit parallel compile jobs for Flang (reduces memory usage on systems with many cores)")
+set(LLVM_PARALLEL_LINK_JOBS "" CACHE STRING "Limit parallel link jobs for LLVM (reduces memory usage on systems with many cores)")
+
+# List of python executables to use for multi-version python builds
+set(THEROCK_DIST_PYTHON_EXECUTABLES "" CACHE STRING "Build for multiple python versions in supported projects (default to Python3_EXECUTABLE if empty)")
+
+# List of python executables to use for building software that needs to embed
+# python (i.e. rocgdb). If this is empty then those components may build without
+# embedded python features. For production release, this is often different
+# from THEROCK_DIST_PYTHON_EXECUTABLES because the former is built without
+# libpython shared library support (because that is the safest way to build
+# extensions).
+set(THEROCK_SHARED_PYTHON_EXECUTABLES "" CACHE STRING "Build subprojects for embedded python variants (defaults to Python3_EXECUTABLE iff it was built shared)")
+
+# Source settings.
+# Use the rocm-libraries superrepo tracked in TheRock's `.gitmodules` or
+# allow to specify an alternative source location.
+set(THEROCK_ROCM_LIBRARIES_SOURCE_DIR_DEFAULT "${THEROCK_SOURCE_DIR}/rocm-libraries")
+set(THEROCK_ROCM_LIBRARIES_SOURCE_DIR "${THEROCK_ROCM_LIBRARIES_SOURCE_DIR_DEFAULT}" CACHE STRING "Path to rocm-libraries superrepo")
+cmake_path(ABSOLUTE_PATH THEROCK_ROCM_LIBRARIES_SOURCE_DIR NORMALIZE)
+
+set(THEROCK_ROCM_SYSTEMS_SOURCE_DIR_DEFAULT "${THEROCK_SOURCE_DIR}/rocm-systems")
+set(THEROCK_ROCM_SYSTEMS_SOURCE_DIR "${THEROCK_ROCM_SYSTEMS_SOURCE_DIR_DEFAULT}" CACHE STRING "Path to rocm-systems superrepo")
+cmake_path(ABSOLUTE_PATH THEROCK_ROCM_SYSTEMS_SOURCE_DIR NORMALIZE)
+
+# Allow specifying alternative source locations for ROCgdb, amd-dbgapi
+# and rocr-debug-agent (and rocr-debug-agent-tests as a consequence).
+therock_enable_external_source("rocgdb" "${THEROCK_SOURCE_DIR}/debug-tools/rocgdb/source" OFF)
+therock_enable_external_source("amd-dbgapi" "${THEROCK_ROCM_SYSTEMS_SOURCE_DIR}/projects/rocdbgapi" OFF)
+therock_enable_external_source("rocr-debug-agent" "${THEROCK_ROCM_SYSTEMS_SOURCE_DIR}/projects/rocr-debug-agent" OFF)
+
+# Overall build settings.
+option(THEROCK_VERBOSE "Enables verbose CMake statuses" OFF)
+set(THEROCK_DEV_PROJECTS "" CACHE STRING "Semicolon-separated list of subprojects that opt in to source globbing even when otherwise skipped (e.g. amd-llvm).")
+
+# Initialize the install directory.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "${THEROCK_SOURCE_DIR}/install" CACHE PATH "" FORCE)
+  message(STATUS "Defaulted CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+endif()
+
+block(PROPAGATE ROCM_MAJOR_VERSION ROCM_MINOR_VERSION ROCM_PATCH_VERSION)
+  file(READ ${CMAKE_CURRENT_SOURCE_DIR}/version.json VERSION_JSON_STRING)
+  string(JSON VERSION_STRING GET ${VERSION_JSON_STRING} rocm-version)
+  string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" ROCM_VERSION ${VERSION_STRING})
+  if(ROCM_VERSION)
+    set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
+    set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
+    set(ROCM_PATCH_VERSION ${CMAKE_MATCH_3})
+    message(STATUS "ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}")
+  else()
+    message(FATAL_ERROR "Failed to determine ROCm version.")
+  endif()
+endblock()
+
+# Various things need to be lined up across layers to precisely match the HIP version.
+# The only source of truth for this is from the HIP/VERSION file, so we parse it the
+# same way that clr does. While this *should* generally match the ROCM version, at
+# least from a major/minor perspective, the ROCM version is a "user" version, whereas
+# the HIP version is hardcoded into various places in the code.
+block(SCOPE_FOR VARIABLES PROPAGATE THEROCK_HIP_MAJOR_VERSION THEROCK_HIP_MINOR_VERSION)
+  set(VERSION_PATH "${THEROCK_ROCM_SYSTEMS_SOURCE_DIR}/projects/hip/VERSION")
+  if(NOT EXISTS "${VERSION_PATH}")
+    message(FATAL_ERROR "Could not find HIP VERSION file: ${VERSION_PATH}")
+  endif()
+  file(STRINGS "${VERSION_PATH}" VERSION_LIST REGEX "^[0-9]+")
+  list(GET VERSION_LIST 0 THEROCK_HIP_MAJOR_VERSION)
+  list(GET VERSION_LIST 1 THEROCK_HIP_MINOR_VERSION)
+  list(GET VERSION_LIST 2 THEROCK_HIP_PATCH_VERSION)
+  message(STATUS "HIP version: ${THEROCK_HIP_MAJOR_VERSION}.${THEROCK_HIP_MINOR_VERSION}.${THEROCK_HIP_PATCH_VERSION}")
+endblock()
+
+################################################################################
+# Feature flags
+# Project wide flags for controlling the build system.
+################################################################################
+
+# Flag: -DTHEROCK_FLAG_INCLUDE_PROFILER=OFF
+# Note that the profiler is an integral part of the system and disabling it is not
+# fully supported. However, in early bringup, it can be useful to disable building
+# it, even though that may cause problems in other libraries.
+# On some platforms (WIN32 presently), the profiler is always disabled.
+cmake_dependent_option(
+  THEROCK_FLAG_INCLUDE_PROFILER
+  "Allows the profiler to be manually disabled by setting to OFF"
+  ON "NOT WIN32" OFF)
+
+
+################################################################################
+# Debug Options
+################################################################################
+
+option(THEROCK_SPLIT_DEBUG_INFO "Enables splitting of debug info into dbg artifacts (and strips primary packages)" OFF)
+option(THEROCK_MINIMAL_DEBUG_INFO "Enables compiler-specific flags for minimal debug symbols suitable for shipping in packages" OFF)
+option(THEROCK_COMPILER_RT_DEBUG "Enables compiler-rt debug build" OFF)
+option(THEROCK_QUIET_INSTALL "Enable quiet install logging (install logs only go to the logfile)" ON)
+option(THEROCK_USE_SAFE_DEPENDENCY_PROVIDER "Enable the safe dependency provider, performing strict package checks" ON)
+
+################################################################################
+# Feature selection
+# Each feature added via therock_add_feature produces a boolean cache variable
+# like `THEROCK_ENABLE_${feature_name}` that takes its default value from the
+# `THEROCK_ENABLE_${group_name}` if a GROUP is present.
+################################################################################
+option(THEROCK_ENABLE_ALL "Enables building of all feature groups" ON)
+option(THEROCK_ENABLE_CORE "Enable building of core libraries" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_COMM_LIBS "Enable building of comm libraries" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_STORAGE_LIBS "Enable building of storage libraries" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_DEBUG_TOOLS "Enable building the ROCm debug tools" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_MATH_LIBS "Enable building of math libraries" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_ML_LIBS "Enable building of ML libraries" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_PROFILER "Enable building the profiler libraries" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_DC_TOOLS "Enable building of data center tools" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_MEDIA_LIBS "Enable building of Media libraries" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_EMULATION "Enable building of emulation tools" "${THEROCK_ENABLE_ALL}")
+option(THEROCK_ENABLE_HOST_MATH "Build all bundled host math libraries by default" OFF)
+option(THEROCK_ENABLE_WSL "Enable building WSL-specific artifacts" OFF)
+option(THEROCK_RESET_FEATURES "One-shot flag which forces all feature flags to their default state for this configuration run" OFF)
+
+################################################################################
+# Artifact-based features are auto-generated from BUILD_TOPOLOGY.toml
+# To modify artifact features, edit BUILD_TOPOLOGY.toml
+################################################################################
+
+# Include generated topology (contains feature definitions)
+include("${CMAKE_CURRENT_BINARY_DIR}/cmake/therock_topology.cmake")
+
+################################################################################
+# Manual features that don't map to artifacts
+################################################################################
+
+# Core Features.
+# The HIP runtime for ROCm uses different implementations per platform today:
+#   * HIP on Linux uses the HSA runtime in ROCR-Runtime, used by CLR.
+#   * HIP on Windows uses the PAL runtime included directly as part of CLR.
+# https://rocm.docs.amd.com/projects/install-on-windows/en/latest/reference/component-support.html
+# Platform-specific dependencies are handled automatically by therock_add_feature()
+# which filters out CORE_RUNTIME dependency for HIP_RUNTIME on Windows.
+
+# Optional sub-features that control behavior within artifacts
+cmake_dependent_option(THEROCK_MIOPEN_USE_COMPOSABLE_KERNEL
+  "Enables composable kernel in MIOpen" ON
+  "THEROCK_ENABLE_COMPOSABLE_KERNEL" OFF)
+
+cmake_dependent_option(THEROCK_ROCWMMA_ENABLE_BENCHMARKS
+  "Enables building rocWMMA benchmarks" OFF
+  "THEROCK_ENABLE_ROCWMMA;THEROCK_BUILD_TESTING" OFF)
+
+# Additional manual features that don't map to artifacts
+
+# Finalize all feature flags.
+therock_finalize_features()
+therock_report_features()
+
+################################################################################
+# GPU target selection
+#
+# GPU target selection can be done by specifying one of THEROCK_AMDGPU_FAMILIES
+# or THEROCK_AMDGPU_TARGETS. Most targets are bundled into families that include
+# several related targets.
+#
+# If exactly one family or target is specified, then that is also taken to be
+# the THEROCK_AMDGPU_DIST_BUNDLE_NAME, if omitted (this is the identifier
+# embedded into package names). If more than one family or discrete target is
+# specified, then the bundle name must be specified manually.
+#
+# Once cache variable validation is done, THEROCK_AMDGPU_TARGETS will be the
+# fully expanded list of targets (as a local variable). For convenience and
+# because some parts of the tree use a space separated list,
+# THEROCK_AMDGPU_TARGETS_SPACES will also be set.
+#
+# See therock_amdgpu_targets.cmake for further details.
+################################################################################
+
+set(THEROCK_AMDGPU_FAMILIES "" CACHE STRING "AMDGPU target families to build for")
+set(THEROCK_AMDGPU_TARGETS "" CACHE STRING "AMDGPU targets to build for")
+set(THEROCK_AMDGPU_DIST_BUNDLE_NAME "" CACHE STRING "Distribution bundle name for AMDGPU packages")
+
+# Note that if THEROCK_DIST_AMDGPU_FAMILIES and THEROCK_DIST_AMDGPU_TARGETS are empty, then
+# this defaults to the build targets (THEROCK_AMDGPU_FAMILIES). These "dist" targets are used
+# for runtime libraries that embed device code and are marked as target-neutral (which typically
+# means generate for all supported architectures). They are also reported in dist_info.json
+# and consumed by downstream tools such as PyTorch via `rocm-sdk targets`.
+set(THEROCK_DIST_AMDGPU_FAMILIES "" CACHE STRING "AMDGPU target families to use for target-neutral dist projects")
+set(THEROCK_DIST_AMDGPU_TARGETS "" CACHE STRING "AMDGPU targets for target-neutral dist projects (individual gfx targets in addition to those expanded from THEROCK_DIST_AMDGPU_FAMILIES)")
+
+# Test targets control what architectures TARGET_NEUTRAL test artifacts compile device code for.
+# Defaults to all available targets so that a single _generic artifact works on any architecture,
+# making classic CI upload races harmless. Does NOT affect dist_info.json.
+set(THEROCK_TEST_AMDGPU_FAMILIES "" CACHE STRING "AMDGPU target families to build for TARGET_NEUTRAL test artifacts (default: all available)")
+set(THEROCK_TEST_AMDGPU_TARGETS "" CACHE STRING "AMDGPU targets to build for TARGET_NEUTRAL test artifacts (default: all available)")
+
+therock_validate_amdgpu_targets()
+
+################################################################################
+# Global setup
+################################################################################
+
+set(STAGING_INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/staging_install")
+
+# On some distributions, this will install to lib64. We would like
+# consistency in built packages, so hard-code it.
+set(CMAKE_INSTALL_LIBDIR "lib")
+
+if(CMAKE_C_VISIBILITY_PRESET)
+  list(APPEND DEFAULT_CMAKE_ARGS ${CMAKE_C_VISIBILITY_PRESET})
+endif()
+if(CMAKE_CXX_VISIBILITY_PRESET)
+  list(APPEND DEFAULT_CMAKE_ARGS ${CMAKE_CXX_VISIBILITY_PRESET})
+endif()
+
+################################################################################
+# patchelf / install_name_tool
+# Building with bundled sysdep or rocGDB requires patchelf on Linux and
+# install_name_tool on macOS to set RPATH.
+################################################################################
+
+if(THEROCK_BUNDLE_SYSDEPS OR THEROCK_ENABLE_ROCGDB)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_program(PATCHELF patchelf)
+    if(NOT PATCHELF)
+      message(FATAL_ERROR "Building with THEROCK_BUNDLE_SYSDEPS=ON or THEROCK_ENABLE_ROCGDB=ON on Linux requires `patchelf`")
+    endif()
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    # macOS uses install_name_tool (from Xcode) instead of patchelf
+    find_program(INSTALL_NAME_TOOL install_name_tool)
+    if(NOT INSTALL_NAME_TOOL)
+      message(FATAL_ERROR "Building with THEROCK_BUNDLE_SYSDEPS=ON or THEROCK_ENABLE_ROCGDB=ON on macOS requires `install_name_tool` (install Xcode Command Line Tools)")
+    endif()
+  endif()
+endif()
+
+################################################################################
+# Sysdep bundling
+# Each available bundled sysdep is made available with a global variable like
+# `THEROCK_BUNDLED_{name}`. This can be included in subproject RUNTIME_DEPS.
+# If bundling is enabled, then this will be a target, and otherwise empty.
+# Additional platform specific settings may be needed to configure RPATH or
+# SxS DLL loading.
+# If updating supported libraries here, please update:
+#   docs/development/dependencies.md
+################################################################################
+
+set(THEROCK_BUNDLED_BZIP2)
+set(THEROCK_BUNDLED_ELFUTILS)
+set(THEROCK_BUNDLED_EXPAT)
+set(THEROCK_BUNDLED_GMP)
+set(THEROCK_BUNDLED_HWLOC)
+set(THEROCK_BUNDLED_LIBBACKTRACE)
+set(THEROCK_BUNDLED_LIBCAP)
+set(THEROCK_BUNDLED_LIBDRM)
+set(THEROCK_BUNDLED_LIBLZMA)
+set(THEROCK_BUNDLED_LIBMNL)
+set(THEROCK_BUNDLED_LIBNL)
+set(THEROCK_BUNDLED_MPFR)
+set(THEROCK_BUNDLED_NCURSES)
+set(THEROCK_BUNDLED_NUMACTL)
+set(THEROCK_BUNDLED_SQLITE3)
+set(THEROCK_BUNDLED_UTIL_LINUX)
+set(THEROCK_BUNDLED_ZLIB)
+set(THEROCK_BUNDLED_ZSTD)
+set(THEROCK_BUNDLED_AMDMESA)
+
+
+if(THEROCK_BUNDLE_SYSDEPS)
+  message(STATUS "Building with bundled system dependencies enabled")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_program(MESON_BUILD meson)
+    if(NOT MESON_BUILD)
+      message(FATAL_ERROR "Building with THEROCK_BUNDLE_SYSDEPS=ON on Linux requires (easiest: `pip install meson`)")
+    endif()
+    # Core sysdeps (always part of the 'sysdeps' artifact)
+    set(THEROCK_BUNDLED_BZIP2 therock-bzip2)
+    set(THEROCK_BUNDLED_ELFUTILS therock-elfutils)
+    set(THEROCK_BUNDLED_LIBBACKTRACE therock-libbacktrace)
+    set(THEROCK_BUNDLED_LIBCAP therock-libcap)
+    set(THEROCK_BUNDLED_LIBDRM therock-libdrm)
+    set(THEROCK_BUNDLED_LIBLZMA therock-liblzma)
+    set(THEROCK_BUNDLED_LIBMNL therock-libmnl)
+    set(THEROCK_BUNDLED_LIBNL therock-libnl)
+    set(THEROCK_BUNDLED_NUMACTL therock-numactl)
+    set(THEROCK_BUNDLED_SQLITE3 therock-sqlite3)
+    set(THEROCK_BUNDLED_ZLIB therock-zlib)
+    set(THEROCK_BUNDLED_ZSTD therock-zstd)
+    # Optional sysdeps (gated on their artifact feature flags)
+    if(THEROCK_ENABLE_SYSDEPS_EXPAT)
+      set(THEROCK_BUNDLED_EXPAT therock-expat)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_GMP)
+      set(THEROCK_BUNDLED_GMP therock-gmp)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_HWLOC)
+      set(THEROCK_BUNDLED_HWLOC therock-hwloc)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_MPFR)
+      set(THEROCK_BUNDLED_MPFR therock-mpfr)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_NCURSES)
+      set(THEROCK_BUNDLED_NCURSES therock-ncurses)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_AMD_MESA)
+      set(THEROCK_BUNDLED_AMDMESA therock-amd-mesa)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_UTIL_LINUX)
+      set(THEROCK_BUNDLED_UTIL_LINUX therock-util-linux)
+    endif()
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    find_program(MESON_BUILD meson)
+    if(NOT MESON_BUILD)
+      message(FATAL_ERROR "Building with THEROCK_BUNDLE_SYSDEPS=ON on macOS requires `meson` (easiest: `pip install meson`)")
+    endif()
+    # macOS bundled deps - note: libcap, libdrm, numactl are Linux-specific
+    # Core sysdeps
+    set(THEROCK_BUNDLED_BZIP2 therock-bzip2)
+    set(THEROCK_BUNDLED_ELFUTILS therock-elfutils)
+    set(THEROCK_BUNDLED_LIBBACKTRACE therock-libbacktrace)
+    set(THEROCK_BUNDLED_LIBLZMA therock-liblzma)
+    set(THEROCK_BUNDLED_SQLITE3 therock-sqlite3)
+    set(THEROCK_BUNDLED_ZLIB therock-zlib)
+    set(THEROCK_BUNDLED_ZSTD therock-zstd)
+    # Optional sysdeps
+    if(THEROCK_ENABLE_SYSDEPS_EXPAT)
+      set(THEROCK_BUNDLED_EXPAT therock-expat)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_GMP)
+      set(THEROCK_BUNDLED_GMP therock-gmp)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_MPFR)
+      set(THEROCK_BUNDLED_MPFR therock-mpfr)
+    endif()
+    if(THEROCK_ENABLE_SYSDEPS_NCURSES)
+      set(THEROCK_BUNDLED_NCURSES therock-ncurses)
+    endif()
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(THEROCK_BUNDLED_BZIP2 therock-bzip2)
+    set(THEROCK_BUNDLED_SQLITE3 therock-sqlite3)
+    set(THEROCK_BUNDLED_ZLIB therock-zlib)
+    set(THEROCK_BUNDLED_ZSTD therock-zstd)
+  else()
+    message(FATAL_ERROR "Bundled system deps not supported on this platform (THEROCK_BUNDLE_SYSDEPS=ON)")
+  endif()
+endif()
+
+################################################################################
+# Priority build targets.
+# By declaring these first as part of ALL, we influence build order a little
+# bit, helping to ensure that the critical path projects start as soon as
+# possible.
+################################################################################
+
+add_custom_target(therock-priority-build ALL)
+if(THEROCK_ENABLE_COMPILER)
+  add_dependencies(therock-priority-build amd-llvm)
+endif()
+
+################################################################################
+# External project setup
+################################################################################
+
+# Add subdirectories in dependency DAG order (which happens to be semi-alpha:
+# don't be fooled).
+add_subdirectory(third-party/sysdeps)
+add_subdirectory(base)
+add_subdirectory(compiler)
+add_subdirectory(third-party)
+add_subdirectory(core)
+add_subdirectory(debug-tools)
+# Note that rocprofiler-register is in base and is what higher level clients
+# depend on. The profiler itself is independent.
+add_subdirectory(profiler)
+# Emulation and instrumentation tools.
+add_subdirectory(emulation)
+# Data center tools (RDC, etc.)
+add_subdirectory(dctools)
+add_subdirectory(comm-libs)
+add_subdirectory(storage-libs)
+add_subdirectory(math-libs)
+add_subdirectory(ml-libs)
+add_subdirectory(media-libs)
+
+if(THEROCK_BUILD_TESTING)
+  add_subdirectory(examples)
+endif()
+
+################################################################################
+# Testing
+################################################################################
+
+if(THEROCK_BUILD_TESTING)
+  if(NOT WIN32)
+    add_executable(
+      dlopen-hip
+      tests/dlopen-hip.c
+    )
+    target_link_libraries(dlopen-hip dl)
+  else()
+    # TODO: Test that is compatible with Windows (LoadLibraryA instead of dlopen)
+    #   then add instructions in the README to run with a command like
+    #   `./build/dlopen-hip install/amdhip64.dll`
+  endif()
+endif()
+
+################################################################################
+# Finalization
+################################################################################
+therock_subproject_merge_compile_commands()

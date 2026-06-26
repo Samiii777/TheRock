@@ -1,0 +1,52 @@
+#!/usr/bin/make -f
+# See debhelper(7) (uncomment to enable)
+# output every command that modifies files on the build system.
+#export DH_VERBOSE = 1
+
+%:
+	dh $@ --no-parallel
+
+
+override_dh_builddeb:
+	dh_builddeb -- -Zxz
+
+{% if disable_dwz %}
+override_dh_dwz:
+	:
+{% endif %}
+
+
+{% if disable_dh_strip %}
+override_dh_strip:
+	:
+{% else %}
+override_dh_strip:
+
+	mkdir -p debian/.llvm-tools
+	# Unprefixed names
+	ln -sf "$(shell command -v llvm-strip-20)"   debian/.llvm-tools/strip
+	ln -sf "$(shell command -v llvm-objcopy-20)" debian/.llvm-tools/objcopy
+	PATH="$(CURDIR)/debian/.llvm-tools:$(PATH)" dh_strip -X.a -X.hsaco
+{% endif %}
+
+override_dh_installchangelogs:
+	# Skip the default documentation installation in /usr/share/doc
+	# Install the Debian changelog only to the custom location
+	install -d $(CURDIR)/debian/{{ pkg_name }}{{ install_prefix }}/share/doc/{{ pkg_name }}
+	if [ -f $(CURDIR)/debian/changelog ]; then \
+		install -m 644 $(CURDIR)/debian/changelog \
+			$(CURDIR)/debian/{{ pkg_name }}{{ install_prefix }}/share/doc/{{ pkg_name }}/changelog.Debian; \
+		gzip -9 -f $(CURDIR)/debian/{{ pkg_name }}{{ install_prefix }}/share/doc/{{ pkg_name }}/changelog.Debian; \
+	fi
+
+override_dh_installdocs:
+  # Empty block skip default documentation installation in /usr/share/doc
+  :
+
+override_dh_shlibdeps:
+	@echo "Skipping dh_shlibdeps"
+
+
+override_dh_clean:
+	dh_clean
+	rm -f ../*.dsc ../*.tar.gz

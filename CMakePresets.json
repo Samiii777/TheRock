@@ -1,0 +1,139 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "linux-release-package",
+      "displayName": "Linux release packages",
+      "description": "Ninja generator, default compiler, RelWithDebInfo for most subprojects",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "amd-llvm_BUILD_TYPE": "Release",
+        "therock-host-blas_BUILD_TYPE": "Release",
+        "therock-SuiteSparse_BUILD_TYPE": "Release",
+        "THEROCK_SPLIT_DEBUG_INFO": "ON",
+        "THEROCK_MINIMAL_DEBUG_INFO": "ON",
+        "THEROCK_QUIET_INSTALL": "OFF",
+        "THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS": "ON"
+      }
+    },
+    {
+      "name": "linux-release-asan",
+      "displayName": "Linux release asan build",
+      "description": "Ninja generator, default compiler, RelWithDebInfo and ASAN for most runtime subprojects",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "amd-llvm_BUILD_TYPE": "Release",
+        "therock-host-blas_BUILD_TYPE": "Release",
+        "therock-SuiteSparse_BUILD_TYPE": "Release",
+        "THEROCK_SANITIZER": "ASAN",
+        "amd-llvm_SANITIZER": "OFF",
+        "amd-comgr_SANITIZER": "ASAN",
+        "hipcc_SANITIZER": "OFF",
+        "hipify_SANITIZER": "OFF",
+        "aqlprofile_SANITIZER": "OFF",
+        "rocprof-trace-decoder_SANITIZER": "OFF",
+        "roctracer_SANITIZER": "OFF",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -g1",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g1",
+        "CMAKE_CXX_FLAGS": "-g1",
+        "CMAKE_C_FLAGS": "-g1",
+        "THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS": "ON"
+      }
+    },
+    {
+      "name": "linux-release-host-asan",
+      "displayName": "Linux release host-only asan build",
+      "description": "Ninja generator, default compiler, RelWithDebInfo with host-side ASAN only (no device-side instrumentation)",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "amd-llvm_BUILD_TYPE": "Release",
+        "therock-host-blas_BUILD_TYPE": "Release",
+        "therock-SuiteSparse_BUILD_TYPE": "Release",
+        "THEROCK_SANITIZER": "HOST_ASAN",
+        "amd-llvm_SANITIZER": "OFF",
+        "amd-comgr_SANITIZER": "HOST_ASAN",
+        "hipcc_SANITIZER": "OFF",
+        "hipify_SANITIZER": "OFF",
+        "aqlprofile_SANITIZER": "OFF",
+        "rocprof-trace-decoder_SANITIZER": "OFF",
+        "roctracer_SANITIZER": "OFF",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -g1",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g1",
+        "CMAKE_CXX_FLAGS": "-g1",
+        "CMAKE_C_FLAGS": "-g1",
+        "THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS": "ON"
+      }
+    },
+    {
+      "name": "linux-release-tsan",
+      "displayName": "Linux release tsan build",
+      "description": "Ninja generator, default compiler, RelWithDebInfo and TSAN for most runtime subprojects",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "amd-llvm_BUILD_TYPE": "Release",
+        "therock-host-blas_BUILD_TYPE": "Release",
+        "therock-SuiteSparse_BUILD_TYPE": "Release",
+        "THEROCK_SANITIZER": "TSAN",
+        "amd-llvm_SANITIZER": "OFF",
+        "amd-comgr_SANITIZER": "OFF",
+        "hipcc_SANITIZER": "OFF",
+        "hipify_SANITIZER": "OFF",
+        "aqlprofile_SANITIZER": "OFF",
+        "rocprof-trace-decoder_SANITIZER": "OFF",
+        "rocprofiler-sdk_SANITIZER": "OFF",
+        "roctracer_SANITIZER": "OFF",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -g1",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g1",
+        "CMAKE_CXX_FLAGS": "-g1",
+        "CMAKE_C_FLAGS": "-g1",
+        "THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS": "ON"
+      }
+    },
+    {
+      "name": "windows-base",
+      "displayName": "Windows base preset",
+      "description": "Ninja generator, MSVC (cl.exe), x64 architecture",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "architecture": {
+        "value": "host=x64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "host=x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_LINKER": "link.exe"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows release builds preset",
+      "description": "Ninja generator, MSVC (cl.exe), x64 architecture, Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS": "ON"
+      },
+      "inherits": [
+        "windows-base"
+      ]
+    }
+  ]
+}

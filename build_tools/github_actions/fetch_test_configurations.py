@@ -1,0 +1,937 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""
+This script determines what test configurations to run.
+
+Outputs (written to $GITHUB_OUTPUT):
+  - sanity_component: JSON object for the sanity component, always present as a
+    prerequisite that must pass before other components are run.
+  - components: JSON array of component configs for the regular test matrix
+    (excludes sanity, which is output separately above).
+  - platform: lowercase OS name derived from RUNNER_OS.
+
+Required environment variables:
+  - RUNNER_OS (https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables#detecting-the-operating-system)
+"""
+
+import argparse
+import ast
+import json
+import logging
+import os
+import platform as platform_module
+import sys
+from copy import deepcopy
+from pathlib import Path
+
+# Add tests directory to path for extended_tests imports
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
+from github_actions_api import *
+from extended_tests.benchmark.benchmark_test_matrix import benchmark_matrix
+from extended_tests.functional.functional_test_matrix import functional_matrix
+from amdgpu_family_matrix import (
+    get_all_families_for_trigger_types,
+    select_weighted_label,
+)
+
+logging.basicConfig(level=logging.INFO)
+
+# Note: these paths are relative to the repository root. We could make that
+# more explicit, or use absolute paths.
+SCRIPT_DIR = Path("./build_tools/github_actions/test_executable_scripts")
+
+
+def _get_script_path(script_name: str) -> str:
+    platform_path = SCRIPT_DIR / script_name
+    # Convert to posix (using `/` instead of `\\`) so test workflows can use
+    # 'bash' as the shell on Linux and Windows.
+    posix_path = platform_path.as_posix()
+    return str(posix_path)
+
+
+# Base container options applied to all Linux containers
+# --ipc host - Allows shared memory between host and container
+# --user 0:0 - Running as root, by recommendation of GitHub: https://docs.github.com/en/actions/reference/workflows-and-actions/dockerfile-support#user
+# --ulimit memlock=-1:-1 - Prevents memory allocation issues with ROCm inside container
+# --security-opt seccomp=unconfined - enables memory mapping, and is recommended for containers running in HPC environments
+_BASE_CONTAINER_OPTIONS = [
+    "--ipc host",
+    "--user 0:0",
+    "--ulimit memlock=-1:-1",
+    "--security-opt seccomp=unconfined",
+]
+
+# GPU-specific container options (only applied when linux_cpu_runner != True)
+# --group-add video - Grants access to GPU video group
+# --device /dev/kfd - AMD KFD device for GPU compute
+# --device /dev/dri - Direct Rendering Infrastructure devices
+# --group-add 993,992,110 - Additional GPU-related groups
+# --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+_GPU_CONTAINER_OPTIONS = [
+    "--group-add video",
+    "--device /dev/kfd",
+    "--device /dev/dri",
+    "--group-add 993",
+    "--group-add 992",
+    "--group-add 110",
+    "--env-file /etc/podinfo/gha-gpu-isolation-settings",
+]
+
+
+def _build_container_options(job_config: dict, platform: str) -> dict:
+    """
+    Build the final container_options string by concatenating base, GPU, and job-specific options.
+
+    Args:
+        job_config: The job configuration dictionary
+        platform: The platform (e.g., "linux", "windows")
+
+    Returns:
+        The modified job_config with updated container_options
+    """
+    # Containers are Linux-only (test_component.yml gates container.image on
+    # platform == 'linux'). On other platforms, collapse container_options to an
+    # empty string so `options: ${{ fromJSON(...).container_options }}` doesn't
+    # evaluate to a YAML sequence and fail template parsing.
+    if platform != "linux":
+        job_config["container_options"] = ""
+        return job_config
+
+    # Start with base options (always applied on Linux)
+    options_parts = _BASE_CONTAINER_OPTIONS.copy()
+
+    # Add GPU-specific options unless this is a CPU-only runner
+    if not job_config.get("linux_cpu_runner", False):
+        options_parts.extend(_GPU_CONTAINER_OPTIONS)
+
+    # Add any job-specific container options
+    if "container_options" in job_config:
+        options_parts.extend(job_config["container_options"])
+
+    # Concatenate all parts with a space separator
+    job_config["container_options"] = " ".join(options_parts)
+
+    return job_config
+
+
+# Common settings applied to all jobs
+_common_settings = {}
+
+# Common settings for rocgdb jobs
+_rocgdb_common = {
+    "fetch_artifact_args": "--debug-tools --tests",
+    "timeout_minutes": 30,
+    "platform": ["linux"],
+    "total_shards": 1,
+    "container_image": "ghcr.io/rocm/no_rocm_image_ubuntu24_04_rocgdb@sha256:7063e922b4b9145c92f20011674571f1c97b8fad6faaeb0b7d2d165b0bd9ae8b",  # 2026-04-02T21:47:07.506375216Z
+    "container_options": ["--cap-add=SYS_PTRACE"],
+}
+
+test_matrix = {
+    # Sanity tests - always run first as a prerequisite for other component tests
+    "sanity": {
+        "job_name": "sanity",
+        "fetch_artifact_args": "--base-only",
+        "timeout_minutes": 5,
+        "test_script": f"python {_get_script_path('test_sanity.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+        # Running docker with cap-add and -v /lib/modules, by recommendation of GitHub:
+        # https://rocm.docs.amd.com/projects/amdsmi/en/amd-staging/how-to/setup-docker-container.html
+        "container_options": ["--cap-add SYS_MODULE", "-v /lib/modules:/lib/modules"],
+    },
+    # hip-tests
+    "hip-tests": {
+        "job_name": "hip-tests",
+        "fetch_artifact_args": "--tests",
+        "timeout_minutes": 120,
+        "test_script": f"python {_get_script_path('test_hiptests.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 4,
+            "windows": 4,
+        },
+    },
+    # hipFile (storage-libs) unit tests. CPU-only (mocked), so they run quickly
+    # and do not require a GPU runner.
+    "hipfile": {
+        "job_name": "hipfile",
+        "fetch_artifact_args": "--hipfile --tests",
+        "timeout_minutes": 15,
+        "test_script": f"python {_get_script_path('test_hipfile.py')}",
+        "platform": ["linux"],
+        "linux_cpu_runner": True,
+        "total_shards_dict": {
+            "linux": 1,
+        },
+    },
+    # BLAS tests
+    "rocblas": {
+        "job_name": "rocblas",
+        "fetch_artifact_args": "--blas --tests",
+        # GHA step timeout: max category timeout in rocBLAS should be 24 hours / 6 shards = 4 hours per shard
+        # 240 min + 20% margin = 288 min
+        "timeout_minutes": 288,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 6,
+            "windows": 6,
+        },
+    },
+    "rocroller": {
+        "job_name": "rocroller",
+        "fetch_artifact_args": "--blas --tests",
+        "timeout_minutes": 60,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 5,
+            "windows": 5,
+        },
+        "exclude_family": {
+            # rocroller does not plan to support Linux and Windows gfx115X architectures
+            "linux": [
+                "gfx1150",
+                "gfx1151",
+                "gfx1152",
+                "gfx1153",
+            ],
+            "windows": [
+                "gfx1150",
+                "gfx1151",
+                "gfx1152",
+                "gfx1153",
+            ],
+        },
+    },
+    "tensilelite": {
+        "job_name": "tensilelite",
+        "fetch_artifact_args": "--blas --tests",
+        "timeout_minutes": 15,
+        "test_script": f"python {_get_script_path('test_tensilelite.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+        },
+    },
+    "hipblas": {
+        "job_name": "hipblas",
+        "fetch_artifact_args": "--blas --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        # TODO(#2616): Enable full tests once known machine issues are resolved
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "amdsmi": {
+        "job_name": "amdsmi",
+        "fetch_artifact_args": "--base-only",
+        "timeout_minutes": 10,
+        "test_script": f"python {_get_script_path('test_amdsmi.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+        },
+    },
+    "hipblaslt": {
+        "job_name": "hipblaslt",
+        "fetch_artifact_args": "--blas --tests",
+        "timeout_minutes": 180,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 6,
+            "windows": 1,
+        },
+    },
+    # SOLVER tests
+    "hipsolver": {
+        "job_name": "hipsolver",
+        "fetch_artifact_args": "--blas --tests",
+        "timeout_minutes": 5,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "rocsolver": {
+        "job_name": "rocsolver",
+        "fetch_artifact_args": "--blas --tests",
+        # test_runner.py drives ctest category labels, so it runs a filtered
+        # subset rather than the full ~5 hr extended suite.
+        # 68350(approx) tests needs 48 mins, so 48 mins / 2 shards = 24 mins per shard
+        # 24 mins + 20% margin = 30 mins => ~40 mins (considering gpu delays and lags)
+        "timeout_minutes": 60,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        # Issue for adding windows tests: https://github.com/ROCm/TheRock/issues/1770
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 3,
+            "windows": 2,
+        },
+    },
+    # PRIM tests
+    "rocprim": {
+        "job_name": "rocprim",
+        "fetch_artifact_args": "--prim --tests",
+        "timeout_minutes": 45,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 2,
+            "windows": 2,
+        },
+    },
+    "hipcub": {
+        "job_name": "hipcub",
+        "fetch_artifact_args": "--prim --tests",
+        "timeout_minutes": 45,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "rocgdb-cpu": {
+        **_rocgdb_common,
+        "job_name": "rocgdb-cpu",
+        "test_script": f"python {_get_script_path('test_rocgdb.py')} --tests gdb.dwarf2",
+        "linux_cpu_runner": True,
+    },
+    "rocgdb-gpu": {
+        **_rocgdb_common,
+        "job_name": "rocgdb-gpu",
+        "test_script": f"python {_get_script_path('test_rocgdb.py')} --tests gdb.rocm",
+    },
+    "rocr-debug-agent": {
+        "job_name": "rocr-debug-agent",
+        "fetch_artifact_args": "--debug-tools --tests",
+        "timeout_minutes": 10,
+        "test_script": f"python {_get_script_path('test_rocr-debug-agent.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "rocthrust": {
+        "job_name": "rocthrust",
+        "fetch_artifact_args": "--prim --tests",
+        "timeout_minutes": 45,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # SPARSE tests
+    "hipsparse": {
+        "job_name": "hipsparse",
+        "fetch_artifact_args": "--blas --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 3,
+            "windows": 3,
+        },
+    },
+    "rocsparse": {
+        "job_name": "rocsparse",
+        "fetch_artifact_args": "--blas --tests",
+        # rocsparse runs as a single shard for now, so the full suite executes in
+        # one process and needs a generous timeout. This will be reduced soon once
+        # rocsparse moves to multi-shard gtest sharding (pending the tolerance fix
+        # in ROCm/rocm-libraries#8713).
+        "timeout_minutes": 240,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "hipsparselt": {
+        "job_name": "hipsparselt",
+        "fetch_artifact_args": "--blas --tests",
+        # GHA step timeout: max category timeout in hipsparselt should be 6 hours / 6 shards = 60 min per shard
+        # 60 min + 20% margin = 72 min
+        "timeout_minutes": 72,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 6,
+            "windows": 1,
+        },
+        "exclude_family": {
+            # hipsparselt does not plan to support Linux and Windows gfx115X architectures
+            "linux": [
+                "gfx1150",
+                "gfx1151",
+                "gfx1152",
+                "gfx1153",
+            ],
+            "windows": [
+                "gfx1150",
+                "gfx1151",
+                "gfx1152",
+                "gfx1153",
+            ],
+        },
+    },
+    # RAND tests
+    "rocrand": {
+        "job_name": "rocrand",
+        "fetch_artifact_args": "--rand --tests",
+        "timeout_minutes": 15,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "hiprand": {
+        "job_name": "hiprand",
+        "fetch_artifact_args": "--rand --tests",
+        "timeout_minutes": 5,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # FFT tests
+    "rocfft": {
+        "job_name": "rocfft",
+        "fetch_artifact_args": "--fft --rand --tests",
+        "timeout_minutes": 60,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        # TODO(geomin12): Add windows test (https://github.com/ROCm/TheRock/issues/1391)
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "hipfft": {
+        "job_name": "hipfft",
+        "fetch_artifact_args": "--fft --rand --tests",
+        "timeout_minutes": 60,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 2,
+            "windows": 2,
+        },
+    },
+    # MIOpen tests
+    "miopen": {
+        "job_name": "miopen",
+        "fetch_artifact_args": "--blas --miopen --rand --tests",
+        # GHA step timeout: sized to allow nightly comprehensive runs (~2 hr).
+        # Per-test CTest TIMEOUT in rocm-libraries/projects/miopen/test/gtest/
+        # test_categories.yaml bounds individual tests (quick: 10 min,
+        # standard: 60 min, etc).
+        "timeout_minutes": 120,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 4,
+            "windows": 4,
+        },
+    },
+    # RCCL tests
+    "rccl": {
+        "job_name": "rccl",
+        "fetch_artifact_args": "--rccl --tests",
+        "timeout_minutes": 15,
+        "test_script": f"pytest {_get_script_path('test_rccl.py')} -v -s --log-cli-level=info",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+        # Architectures that we have multi GPU setup for testing
+        "multi_gpu": {"linux": ["gfx94X-dcgpu", "gfx950-dcgpu"]},
+    },
+    # rocprofiler-sdk tests
+    "rocprofiler-sdk": {
+        "job_name": "rocprofiler-sdk",
+        "fetch_artifact_args": "--tests",
+        "timeout_minutes": 15,
+        "additional_requirements_files": [
+            "share/rocprofiler-sdk/tests/requirements.txt",
+        ],
+        "test_script": f"python {_get_script_path('test_rocprofiler_sdk.py')}",
+        "platform": ["linux"],
+        "container_options": ["--cap-add=SYS_PTRACE"],
+        "total_shards_dict": {
+            "linux": 1,
+        },
+    },
+    # hipDNN tests
+    "hipdnn": {
+        "job_name": "hipdnn",
+        "fetch_artifact_args": "--hipdnn --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # hipDNN install/consumption tests
+    "hipdnn_install": {
+        "job_name": "hipdnn_install",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_hipdnn_install.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # !! DISABLED because of https://github.com/ROCm/TheRock/issues/5689
+    # !! Windows loading of the python bindings require special LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+    # !! We need AddDllDirectory. Commenting out to unblock CI issues.
+    # hipDNN Python bindings wheel build + install + pytest
+    # "hipdnn_python_bindings": {
+    #     "job_name": "hipdnn_python_bindings",
+    #     "fetch_artifact_args": "--blas --miopen --hipdnn --miopenprovider --tests",
+    #     "timeout_minutes": 30,
+    #     "test_script": f"python {_get_script_path('test_hipdnn_frontend_python.py')}",
+    #     "platform": ["linux", "windows"],
+    #     "total_shards_dict": {
+    #         "linux": 1,
+    #         "windows": 1,
+    #     },
+    # },
+    # hipDNN integration tests (unit tests for the integration test harness)
+    "hipdnn-integration-tests": {
+        "job_name": "hipdnn-integration-tests",
+        "fetch_artifact_args": "--hipdnn --hipdnn-integration-tests --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_hipdnn_integration_tests.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # hipDNN samples tests
+    "hipdnn-samples": {
+        "job_name": "hipdnn-samples",
+        "fetch_artifact_args": "--blas --miopen --hipdnn --miopenprovider --hipdnn-samples --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_hipdnn_samples.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # MIOpen provider tests
+    "miopenprovider": {
+        "job_name": "miopenprovider",
+        "fetch_artifact_args": "--blas --miopen --hipdnn --miopenprovider --hipdnn-integration-tests --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_miopenprovider.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # hipBLASLt provider tests
+    "hipblasltprovider": {
+        "job_name": "hipblasltprovider",
+        "fetch_artifact_args": "--blas --hipdnn --hipblasltprovider --hipdnn-integration-tests --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_hipblasltprovider.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "hipkernelprovider": {
+        "job_name": "hipkernelprovider",
+        "fetch_artifact_args": "--hipdnn --hipkernelprovider --hipdnn-integration-tests --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_hipkernelprovider.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # rocWMMA tests
+    "rocwmma": {
+        "job_name": "rocwmma",
+        "fetch_artifact_args": "--rocwmma --tests --blas",
+        # Headroom above typical shard runtime; per-test CTest timeouts fail fast on hangs (ROCM-24171).
+        "timeout_minutes": 90,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 5,
+            "windows": 2,
+        },
+    },
+    # rocALUTION tests
+    "rocalution": {
+        "job_name": "rocalution",
+        "fetch_artifact_args": "--rocalution --tests --blas --rand",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # profiler tests
+    "rocprofiler-compute": {
+        "job_name": "rocprofiler-compute",
+        "fetch_artifact_args": "--rocprofiler-compute --rocprofiler-sdk --tests",
+        "timeout_minutes": 60,
+        "additional_requirements_files": [
+            "libexec/rocprofiler-compute/requirements.txt",
+            "libexec/rocprofiler-compute/requirements-test.txt",
+        ],
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {"linux": 2},
+    },
+    "rocprofiler-systems": {
+        "job_name": "rocprofiler-systems",
+        "fetch_artifact_args": "--rocprofiler-systems --rocprofiler-systems-examples --rocprofiler-sdk --tests",
+        "timeout_minutes": 60,
+        "additional_requirements_files": [
+            "share/rocprofiler-systems/tests/requirements.txt",
+        ],
+        "test_script": f"python {_get_script_path('test_rocprofiler_systems.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+        },
+    },
+    # libhipcxx hipcc tests
+    "libhipcxx_hipcc": {
+        "job_name": "libhipcxx_hipcc",
+        "fetch_artifact_args": "--libhipcxx --tests",
+        "timeout_minutes": 30,
+        "test_script": f"python {_get_script_path('test_libhipcxx_hipcc.py')}",
+        "platform": ["linux", "windows"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # libhipcxx hiprtc tests
+    "libhipcxx_hiprtc": {
+        "job_name": "libhipcxx_hiprtc",
+        "fetch_artifact_args": "--libhipcxx --tests",
+        "timeout_minutes": 20,
+        "test_script": f"python {_get_script_path('test_libhipcxx_hiprtc.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    "rocdecode": {
+        "job_name": "rocdecode",
+        "fetch_artifact_args": "--rocdecode --tests",
+        "timeout_minutes": 10,
+        "test_script": f"python {_get_script_path('test_rocdecode.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+        },
+        # rocdecode requires FFmpeg dev libraries (libavcodec-dev, libavformat-dev,
+        # libavutil-dev) for test builds. These are not bundled in TheRock
+        # artifacts and are provided via the specialized media image.
+        "container_image": "ghcr.io/rocm/no_rocm_image_ubuntu24_04_media@sha256:d715ae2db664b055c90343e00588ce9ac3eec387513fe359396e5e08e75521ca",
+    },
+    "rocjpeg": {
+        "job_name": "rocjpeg",
+        "fetch_artifact_args": "--rocjpeg --tests",
+        "timeout_minutes": 10,
+        "test_script": f"python {_get_script_path('test_rocjpeg.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+        },
+    },
+    # aqlprofile tests
+    "aqlprofile": {
+        "job_name": "aqlprofile",
+        "fetch_artifact_args": "--aqlprofile --tests",
+        "timeout_minutes": 5,
+        "test_script": f"python {_get_script_path('test_aqlprofile.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # rocrtst tests
+    "rocrtst": {
+        "job_name": "rocrtst",
+        "fetch_artifact_args": "--rocrtst --tests",
+        "timeout_minutes": 15,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+            "windows": 1,
+        },
+    },
+    # hipTensor tests
+    "hiptensor": {
+        "job_name": "hiptensor",
+        "fetch_artifact_args": "--hiptensor --tests",
+        "timeout_minutes": 15,
+        "test_script": f"python {_get_script_path('test_runner.py')}",
+        "platform": ["linux"],
+        "total_shards_dict": {
+            "linux": 1,
+        },
+    },
+}
+
+
+def run():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--platform",
+        type=str,
+        default=platform_module.system().lower(),
+        help="Platform to configure tests for (linux or windows)",
+    )
+    args, _ = parser.parse_known_args()
+    platform = args.platform
+    projects_to_test = os.getenv("PROJECTS_TO_TEST", "*")
+    amdgpu_families = os.getenv("AMDGPU_FAMILIES")
+    test_type = os.getenv("TEST_TYPE", "standard")
+    test_labels = ast.literal_eval(os.getenv("TEST_LABELS") or "[]")
+    run_extended_tests = str2bool(os.getenv("RUN_EXTENDED_TESTS", "false"))
+    windows_hip_rocr_tests = str2bool(os.getenv("WINDOWS_HIP_ROCR_TESTS", "false"))
+
+    # Get runner config for per-component runner selection
+    # This enables better load distribution across runner pools
+    test_runs_on_labels = None
+    test_runs_on_default = None
+    test_runs_on_multi_gpu_labels = None
+    test_runs_on_multi_gpu_default = None
+    if amdgpu_families:
+        shortened_family = amdgpu_families.split("-")[0].lower()
+        all_families = get_all_families_for_trigger_types(
+            ["presubmit", "postsubmit", "nightly"]
+        )
+        if shortened_family in all_families:
+            platform_info = all_families[shortened_family].get(platform, {})
+            test_runs_on_labels = platform_info.get("test-runs-on-labels")
+            test_runs_on_default = platform_info.get("test-runs-on", "")
+            test_runs_on_multi_gpu_labels = platform_info.get(
+                "test-runs-on-multi-gpu-labels"
+            )
+            test_runs_on_multi_gpu_default = platform_info.get(
+                "test-runs-on-multi-gpu", ""
+            )
+
+    logging.info(f"Selecting projects: {projects_to_test}")
+
+    # Build the selected test matrix:
+    # 1) Start from regular tests
+    # 2) Optionally merge extended tests (functional + benchmarks)
+    selected_matrix: dict = deepcopy(test_matrix)
+    logging.info(f"Using test_matrix ({len(selected_matrix)} test(s))")
+
+    if run_extended_tests and functional_matrix:
+        logging.info(
+            f"Merging {len(functional_matrix)} functional test(s) into test matrix"
+        )
+        for key, value in functional_matrix.items():
+            selected_matrix[key] = deepcopy(value)
+
+    if run_extended_tests and benchmark_matrix:
+        logging.info(
+            f"Merging {len(benchmark_matrix)} benchmark test(s) into test matrix"
+        )
+        for key, value in benchmark_matrix.items():
+            entry = deepcopy(value)
+            entry["is_benchmark"] = True
+            selected_matrix[key] = entry
+
+    # This string -> array conversion ensures no partial strings are detected during test selection (ex: "hipblas" in ["hipblaslt", "rocblas"] = false)
+    project_array = [item.strip() for item in projects_to_test.split(",")]
+
+    all_components = []
+    for key in selected_matrix:
+        job_name = selected_matrix[key]["job_name"]
+
+        # If the test is disabled for a particular platform, skip the test
+        if (
+            "exclude_family" in selected_matrix[key]
+            and platform in selected_matrix[key]["exclude_family"]
+            and amdgpu_families in selected_matrix[key]["exclude_family"][platform]
+        ):
+            logging.info(
+                f"Excluding job {job_name} for platform {platform} and family {amdgpu_families}"
+            )
+            continue
+
+        # If test labels are populated, and the test job name is not in the test labels, skip the test
+        # Note: Benchmarks never use test_labels (always empty list)
+        parsed_test_labels = [c.split("test:")[-1] for c in test_labels]
+        if key != "sanity" and parsed_test_labels and key not in parsed_test_labels:
+            logging.info(f"Excluding job {job_name} since it's not in the test labels")
+            continue
+
+        # If the test is enabled for a particular platform and a particular (or all) projects are selected.
+        # Note: Sanity goes through the same all_components loop as other components, but is separated
+        # into its own sanity_component GHA output after the loop (see gha_set_output below).
+        if platform in selected_matrix[key]["platform"] and (
+            key == "sanity" or key in project_array or "*" in project_array
+        ):
+            logging.info(f"Including job {job_name} with test_type {test_type}")
+
+            # Hip-tests on Windows: always run PAL (pass/fail). Optionally also run
+            # ROCR (informational) for parity tracking when WINDOWS_HIP_ROCR_TESTS=true.
+            # See: https://github.com/ROCm/TheRock/issues/3587
+            if key == "hip-tests" and platform == "windows":
+                base = selected_matrix[key]
+                total_shards = base.get("total_shards_dict", {}).get(platform, 1)
+                if test_type == "quick":
+                    total_shards = 1
+
+                shard_arr = list(range(1, total_shards + 1))
+
+                pal_entry = {
+                    **_common_settings,
+                    "job_name": "hip-tests (PAL)",
+                    "fetch_artifact_args": base["fetch_artifact_args"],
+                    "timeout_minutes": base["timeout_minutes"],
+                    "test_script": base["test_script"],
+                    "platform": base["platform"],
+                    "total_shards": total_shards,
+                    "test_type": test_type,
+                    "shard_arr": shard_arr,
+                    "gpu_enable_pal": "1",
+                }
+                all_components.append(pal_entry)
+
+                if windows_hip_rocr_tests:
+                    rocr_entry = {
+                        **_common_settings,
+                        "job_name": "hip-tests (ROCR)",
+                        "fetch_artifact_args": base["fetch_artifact_args"],
+                        "timeout_minutes": base["timeout_minutes"],
+                        "test_script": base["test_script"],
+                        "platform": base["platform"],
+                        "total_shards": total_shards,
+                        "test_type": test_type,
+                        "shard_arr": shard_arr,
+                        "expect_failure": True,
+                        "gpu_enable_pal": "0",
+                    }
+                    all_components.append(rocr_entry)
+                continue
+
+            job_config_data = {**_common_settings, **selected_matrix[key]}
+            job_config_data["test_type"] = test_type
+            # For CI testing, we construct a shard array based on "total_shards" from "fetch_test_configurations.py"
+            # This way, the test jobs will be split up into X shards. (ex: [1, 2, 3, 4] = 4 test shards)
+            # For display purposes, we add "i + 1" for the job name (ex: 1 of 4). During the actual test sharding in the test executable, this array will become 0th index
+            # Note: Benchmarks always have total_shards=1 (no sharding)
+            total_shards = job_config_data.get("total_shards_dict", {}).get(platform, 1)
+            job_config_data["shard_arr"] = [i + 1 for i in range(total_shards)]
+            job_config_data["total_shards"] = total_shards
+
+            # If the test type is quick tests, we only need one shard for the test job
+            # Note: Benchmarks always use test_type="full" but have total_shards=1 anyway
+            if test_type == "quick":
+                job_config_data["total_shards"] = 1
+                job_config_data["shard_arr"] = [1]
+
+            # If the test requires multi GPU testing, we use a multi-GPU test runner for this specific test
+            # Inside the "multi_gpu" field, we have a mapping of amdgpu_family -> bool (if multi GPU testing is enabled for that family)
+            # If the multi GPU test runner is not enabled, we will skip the test
+            if "multi_gpu" in selected_matrix[key]:
+                if (
+                    platform in selected_matrix[key]["multi_gpu"]
+                    and amdgpu_families in selected_matrix[key]["multi_gpu"][platform]
+                ):
+                    # Mark this component as needing a multi-GPU runner.
+                    # The actual runner selection is done in the per-component loop below.
+                    job_config_data["multi_gpu_runner"] = True
+                    logging.info(
+                        f"Including job {job_name} for multi GPU testing with family {amdgpu_families}"
+                    )
+                else:
+                    # If the architecture is not available for multi GPU testing, we skip the test requiring multi GPU
+                    logging.info(
+                        f"Excluding job {job_name} since multi GPU testing is not available for family {amdgpu_families}"
+                    )
+                    continue
+
+            all_components.append(job_config_data)
+
+    # Per-component runner selection for better load distribution
+    # Each component gets its own independent random draw based on configured weights
+    for component in all_components:
+        job_name = component.get("job_name", "unknown")
+        if "multi_gpu_runner" in component:
+            # Multi-GPU components use multi-GPU runner labels
+            if test_runs_on_multi_gpu_labels:
+                component["multi_gpu_runner"] = select_weighted_label(
+                    test_runs_on_multi_gpu_labels, f"{job_name}-multi-gpu"
+                )
+            elif test_runs_on_multi_gpu_default:
+                component["multi_gpu_runner"] = test_runs_on_multi_gpu_default
+        else:
+            # Regular components use standard runner labels
+            if test_runs_on_labels:
+                component["test_runner"] = select_weighted_label(
+                    test_runs_on_labels, job_name
+                )
+            elif test_runs_on_default:
+                component["test_runner"] = test_runs_on_default
+
+    # Build container options for all components (concatenates base, GPU, and job-specific options)
+    all_components = [_build_container_options(c, platform) for c in all_components]
+
+    # Separate sanity (always a prerequisite) from the regular component matrix.
+    sanity_component = next(
+        (c for c in all_components if c.get("job_name") == "sanity"), None
+    )
+    output_matrix = [c for c in all_components if c.get("job_name") != "sanity"]
+
+    gha_set_output(
+        {
+            "sanity_component": json.dumps(sanity_component),
+            "components": json.dumps(output_matrix),
+            "platform": platform,
+        }
+    )
+
+
+if __name__ == "__main__":
+    run()

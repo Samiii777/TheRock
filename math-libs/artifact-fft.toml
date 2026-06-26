@@ -1,0 +1,31 @@
+# rocFFT
+[components.lib."math-libs/rocFFT/stage"]
+include = [
+  "**/rocfft_kernel_cache.db",
+]
+[components.run."math-libs/rocFFT/stage"]
+include = [
+  "**/rocfft_rtc_helper*",
+]
+[components.dbg."math-libs/rocFFT/stage"]
+[components.dev."math-libs/rocFFT/stage"]
+[components.doc."math-libs/rocFFT/stage"]
+[components.test."math-libs/rocFFT/stage"]
+include = [
+  "bin/rocfft-test*",
+  "bin/rocfft-bench*",
+  "bin/dyna-rocfft-bench*",
+  "bin/rocfft/**",
+]
+
+# hipFFT
+[components.lib."math-libs/hipFFT/stage"]
+[components.dbg."math-libs/hipFFT/stage"]
+[components.dev."math-libs/hipFFT/stage"]
+[components.doc."math-libs/hipFFT/stage"]
+[components.test."math-libs/hipFFT/stage"]
+include = [
+  # Clients tests (test_runner runs ctest from bin/hipfft/; needs CTestTestfile.cmake)
+  "bin/hipfft/**",
+  "bin/hipfft-test*",
+]

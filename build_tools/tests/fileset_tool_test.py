@@ -1,0 +1,385 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+import hashlib
+import os
+from pathlib import Path
+import platform
+import shlex
+import subprocess
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
+from _therock_utils.hash_util import calculate_hash
+
+FILESET_TOOL = Path(__file__).parent.parent / "fileset_tool.py"
+
+ARTIFACT_DESCRIPTOR_1 = r"""
+[options]
+unmatched_exclude = "include/foobar.h"
+
+[components.doc]
+
+[components.doc."example/stage"]
+include = [
+    "**/*.so.1",
+]
+[components.lib."example/stage"]
+"""
+
+
+def capture(args: list[str | Path], cwd: Path = FILESET_TOOL.parent) -> str:
+    args = [str(arg) for arg in args]
+    print(f"++ Exec [{cwd}]$ {shlex.join(args)}")
+    return subprocess.check_output(
+        args, cwd=str(cwd), stdin=subprocess.DEVNULL
+    ).decode()
+
+
+def run_command(args: list[str | Path], cwd: Path = FILESET_TOOL.parent):
+    args = [str(arg) for arg in args]
+    print(f"++ Exec [{cwd}]$ {shlex.join(args)}")
+    return subprocess.check_call(args, cwd=str(cwd), stdin=subprocess.DEVNULL)
+
+
+def write_text(p: Path, text: str):
+    p.parent.mkdir(exist_ok=True, parents=True)
+    p.write_text(text)
+
+
+def is_windows():
+    return platform.system() == "Windows"
+
+
+def fset_executable(f):
+    os.fchmod(f.fileno(), os.fstat(f.fileno()).st_mode | 0o111)
+
+
+def is_executable(path: Path):
+    return bool(os.stat(path).st_mode & 0o111)
+
+
+class FilesetToolTest(unittest.TestCase):
+    def setUp(self):
+        override_temp = os.getenv("TEST_TMPDIR")
+        if override_temp is not None:
+            self.temp_context = None
+            self.temp_dir = Path(override_temp)
+            self.temp_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.temp_context = tempfile.TemporaryDirectory()
+            self.temp_dir = Path(self.temp_context.name)
+
+    def tearDown(self):
+        if self.temp_context:
+            self.temp_context.cleanup()
+
+    # Validates that the happy path flow of creating an artifact, archiving it,
+    # expanding and flattening works. This does not exhaustively verify
+    # all descriptor options.
+    def testSimpleArtifact(self):
+        input_dir = self.temp_dir / "input"
+        artifact_dir = self.temp_dir / "artifact_dir"
+        artifact_archive = self.temp_dir / "artifact.tar.xz"
+        descriptor_file = self.temp_dir / "artifact.toml"
+        hash_file = self.temp_dir / "artifact.tar.xz.sha256sum"
+        flat1_dir = self.temp_dir / "flat1"
+        flat2_dir = self.temp_dir / "flat2"
+        write_text(descriptor_file, ARTIFACT_DESCRIPTOR_1)
+
+        # One sample file and a symlink, and an executable.
+        write_text(
+            input_dir / "example" / "stage" / "share" / "doc" / "README.txt",
+            "Hello World!",
+        )
+        Path(input_dir / "example" / "stage" / "share" / "doc" / "README").symlink_to(
+            "README.txt"
+        )
+        if not is_windows():
+            with open(
+                input_dir / "example" / "stage" / "share" / "doc" / "executable", "wb"
+            ) as f:
+                f.write(b"Contents")
+                fset_executable(f)
+        write_text(
+            Path(input_dir / "example" / "stage" / "lib" / "libfoobar.so.1"), "foobar"
+        )
+        write_text(
+            Path(input_dir / "example" / "stage" / "include" / "foobar.h"), "foobar"
+        )
+
+        run_command(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact",
+                "--descriptor",
+                descriptor_file,
+                "--artifact-name",
+                "test",
+                "--root-dir",
+                input_dir,
+                "doc",
+                artifact_dir,
+            ]
+        )
+
+        # Validate artifact dir.
+        manifest_lines = (
+            (artifact_dir / "artifact_manifest.txt").read_text().strip().splitlines()
+        )
+        self.assertEqual(manifest_lines, ["example/stage"])
+        self.assertEqual(
+            (
+                artifact_dir / "example" / "stage" / "share" / "doc" / "README.txt"
+            ).read_text(),
+            "Hello World!",
+        )
+        self.assertEqual(
+            os.readlink(
+                artifact_dir / "example" / "stage" / "share" / "doc" / "README"
+            ),
+            "README.txt",
+        )
+        if not is_windows():
+            self.assertTrue(
+                is_executable(
+                    artifact_dir / "example" / "stage" / "share" / "doc" / "executable"
+                )
+            )
+
+        # Archive it.
+        run_command(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact-archive",
+                artifact_dir,
+                "-o",
+                artifact_archive,
+                "--hash-file",
+                hash_file,
+            ]
+        )
+
+        # Verify digest.
+        expected_digest = calculate_hash(artifact_archive, "sha256").hexdigest()
+        actual_digest = hash_file.read_text().strip()
+        self.assertEqual(expected_digest, actual_digest)
+
+        # Flatten the raw directory and verify.
+        run_command(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact-flatten",
+                artifact_dir,
+                "-o",
+                flat1_dir,
+            ]
+        )
+        self.assertEqual(
+            (flat1_dir / "share" / "doc" / "README.txt").read_text(),
+            "Hello World!",
+        )
+        self.assertEqual(
+            os.readlink(flat1_dir / "share" / "doc" / "README"),
+            "README.txt",
+        )
+        if not is_windows():
+            self.assertTrue(is_executable(flat1_dir / "share" / "doc" / "executable"))
+
+        # Flatten the archive file and verify.
+        flatten_output = capture(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact-flatten",
+                artifact_archive,
+                "--verbose",
+                "-o",
+                flat2_dir,
+            ]
+        )
+        self.assertListEqual(flatten_output.splitlines(), ["example/stage"])
+        self.assertEqual(
+            (flat2_dir / "share" / "doc" / "README.txt").read_text(),
+            "Hello World!",
+        )
+        self.assertEqual(
+            os.readlink(flat2_dir / "share" / "doc" / "README"),
+            "README.txt",
+        )
+        if not is_windows():
+            self.assertTrue(is_executable(flat2_dir / "share" / "doc" / "executable"))
+
+    @unittest.skipIf(is_windows(), "Hardlinks not supported the same way on Windows")
+    def testHardlinkPreservation(self):
+        """Test that hardlinks are preserved through archive/flatten cycle."""
+        input_dir = self.temp_dir / "input"
+        artifact_dir = self.temp_dir / "artifact_hardlink"
+        artifact_archive = self.temp_dir / "artifact_hardlink.tar.xz"
+        descriptor_file = self.temp_dir / "hardlink_descriptor.toml"
+        flat_dir = self.temp_dir / "flat_hardlink"
+
+        # Create descriptor
+        write_text(
+            descriptor_file,
+            """
+[components.lib."example/stage"]
+""",
+        )
+
+        # Create original file (use lib/ since lib component defaults include lib/**)
+        orig_file = input_dir / "example" / "stage" / "lib" / "original.so"
+        orig_file.parent.mkdir(parents=True, exist_ok=True)
+        orig_file.write_text("hardlink test content")
+
+        # Create hardlink
+        link_file = input_dir / "example" / "stage" / "lib" / "hardlink.so"
+        os.link(orig_file, link_file)
+
+        # Verify they share inode before archiving
+        self.assertEqual(os.stat(orig_file).st_ino, os.stat(link_file).st_ino)
+
+        # Create artifact
+        run_command(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact",
+                "--descriptor",
+                descriptor_file,
+                "--artifact-name",
+                "test",
+                "--root-dir",
+                input_dir,
+                "lib",
+                artifact_dir,
+            ]
+        )
+
+        # Archive it
+        run_command(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact-archive",
+                artifact_dir,
+                "-o",
+                artifact_archive,
+            ]
+        )
+
+        # Flatten from archive
+        run_command(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact-flatten",
+                artifact_archive,
+                "-o",
+                flat_dir,
+            ]
+        )
+
+        # Verify hardlinks are preserved (same inode)
+        flat_orig = flat_dir / "lib" / "original.so"
+        flat_link = flat_dir / "lib" / "hardlink.so"
+        self.assertTrue(flat_orig.exists())
+        self.assertTrue(flat_link.exists())
+        self.assertEqual(os.stat(flat_orig).st_ino, os.stat(flat_link).st_ino)
+        self.assertEqual(flat_orig.read_text(), "hardlink test content")
+
+    def testArtifactFlattenSplit(self):
+        """Test artifact-flatten-split discovers and flattens split artifact dirs."""
+        artifacts_dir = self.temp_dir / "artifacts"
+        output_dir = self.temp_dir / "flat_split"
+
+        # Simulate split artifact directories as produced by the artifact splitter.
+        # Each has an artifact_manifest.txt and files under manifest-listed prefixes.
+        for suffix in ["generic", "gfx1201"]:
+            art_dir = artifacts_dir / f"miopen_lib_{suffix}"
+            manifest_prefix = f"miopen_lib_{suffix}/stage"
+            write_text(art_dir / "artifact_manifest.txt", manifest_prefix + "\n")
+            write_text(
+                art_dir / manifest_prefix / "lib" / f"libMIOpen_{suffix}.so",
+                f"lib_{suffix}",
+            )
+
+        # A second prefix with one variant.
+        dev_dir = artifacts_dir / "miopen_dev_generic"
+        write_text(dev_dir / "artifact_manifest.txt", "miopen_dev_generic/stage\n")
+        write_text(
+            dev_dir / "miopen_dev_generic" / "stage" / "include" / "miopen.h",
+            "header",
+        )
+
+        # A directory that should NOT be discovered (no manifest).
+        stray = artifacts_dir / "miopen_lib_stray"
+        stray.mkdir(parents=True)
+        write_text(stray / "something.txt", "no manifest here")
+
+        # Run artifact-flatten-split with verbose to capture discovered dirs.
+        output = capture(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact-flatten-split",
+                "miopen_lib",
+                "miopen_dev",
+                "--artifacts-dir",
+                artifacts_dir,
+                "--verbose",
+                "-o",
+                output_dir,
+            ]
+        )
+
+        # Verify verbose output lists discovered dirs.
+        self.assertIn("miopen_lib_generic", output)
+        self.assertIn("miopen_lib_gfx1201", output)
+        self.assertIn("miopen_dev_generic", output)
+        self.assertNotIn("miopen_lib_stray", output)
+
+        # Verify flattened files from all three artifact dirs.
+        self.assertEqual(
+            (output_dir / "lib" / "libMIOpen_generic.so").read_text(),
+            "lib_generic",
+        )
+        self.assertEqual(
+            (output_dir / "lib" / "libMIOpen_gfx1201.so").read_text(),
+            "lib_gfx1201",
+        )
+        self.assertEqual(
+            (output_dir / "include" / "miopen.h").read_text(),
+            "header",
+        )
+
+    def testArtifactFlattenSplitNoMatch(self):
+        """Test artifact-flatten-split warns when no dirs match."""
+        artifacts_dir = self.temp_dir / "empty_artifacts"
+        artifacts_dir.mkdir(parents=True)
+        output_dir = self.temp_dir / "flat_empty"
+
+        # Should not fail, just warn.
+        output = capture(
+            [
+                sys.executable,
+                FILESET_TOOL,
+                "artifact-flatten-split",
+                "nonexistent_prefix",
+                "--artifacts-dir",
+                artifacts_dir,
+                "-o",
+                output_dir,
+            ]
+        )
+        self.assertIn("Warning", output)
+        self.assertIn("nonexistent_prefix", output)
+
+
+if __name__ == "__main__":
+    unittest.main()
