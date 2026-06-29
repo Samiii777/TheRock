@@ -27,10 +27,42 @@ from typing import Callable, Optional, Sequence
 
 import os
 import re
+import threading
 from pathlib import Path, PurePosixPath
 
 from .archive_util import open_archive_for_read
 from .pattern_match import PatternMatcher, MatchPredicate
+
+
+# When multiple artifact archives are flattened concurrently (e.g. by
+# fetch_artifacts.py's ThreadPoolExecutor) into the same output directory,
+# several archives can contain the same destination file (for example
+# `lib/hsa-runtime64.lib`). Two worker threads can then target the identical
+# `dest_path` at the same time: one holds the file open for writing while the
+# other calls `os.unlink(dest_path)`. On POSIX an open handle survives unlink,
+# but on Windows this raises `PermissionError: [WinError 32]` (the file is in
+# use by another process/thread). To make the flatten write path thread-safe
+# we serialize all operations on a given destination path with a per-path
+# lock, while still allowing distinct destination paths to be written in
+# parallel.
+_dest_path_locks: dict[str, threading.Lock] = {}
+_dest_path_locks_guard = threading.Lock()
+
+
+def _get_dest_path_lock(dest_path: Path) -> threading.Lock:
+    """Returns a process-wide lock unique to the given destination path.
+
+    The same normalized path always maps to the same lock object, so
+    concurrent writers of an identical flattened file are serialized.
+    Different paths get different locks and proceed in parallel.
+    """
+    key = os.path.normcase(os.path.abspath(os.fspath(dest_path)))
+    with _dest_path_locks_guard:
+        lock = _dest_path_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _dest_path_locks[key] = lock
+        return lock
 
 
 class ArtifactName:
@@ -211,56 +243,57 @@ class ArtifactPopulator:
                             if member_name.startswith(prefix_relpath):
                                 scoped_path = member_name[len(prefix_relpath) :]
                                 dest_path = output_path / PurePosixPath(scoped_path)
-                                if dest_path.is_symlink() or (
-                                    dest_path.exists() and not dest_path.is_dir()
-                                ):
-                                    os.unlink(dest_path)
-                                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                                if member.isfile():
-                                    exec_mask = member.mode & 0o111
-                                    with tf.extractfile(member) as member_file:
-                                        with open(
-                                            dest_path,
-                                            "wb",
-                                        ) as out_file:
-                                            out_file.write(member_file.read())
-                                            st = os.fstat(out_file.fileno())
-                                            if hasattr(os, "fchmod"):
-                                                # Windows has no fchmod.
-                                                new_mode = st.st_mode | exec_mask
-                                                os.fchmod(out_file.fileno(), new_mode)
-                                elif member.isdir():
-                                    dest_path.mkdir(parents=True, exist_ok=True)
-                                elif member.issym():
-                                    dest_path.symlink_to(member.linkname)
-                                elif member.islnk():
-                                    # Hardlink: find the target file's destination path
-                                    link_target = member.linkname
-                                    for target_prefix in relpaths:
-                                        target_prefix_slash = target_prefix + "/"
-                                        if link_target.startswith(target_prefix_slash):
-                                            target_scoped_path = link_target[
-                                                len(target_prefix_slash) :
-                                            ]
-                                            if self.flatten:
-                                                target_dest_path = (
-                                                    self.output_path
-                                                    / PurePosixPath(target_scoped_path)
-                                                )
-                                            else:
-                                                target_dest_path = (
-                                                    self.output_path
-                                                    / target_prefix
-                                                    / PurePosixPath(target_scoped_path)
-                                                )
-                                            os.link(target_dest_path, dest_path)
-                                            break
+                                with _get_dest_path_lock(dest_path):
+                                    if dest_path.is_symlink() or (
+                                        dest_path.exists() and not dest_path.is_dir()
+                                    ):
+                                        os.unlink(dest_path)
+                                    dest_path.parent.mkdir(parents=True, exist_ok=True)
+                                    if member.isfile():
+                                        exec_mask = member.mode & 0o111
+                                        with tf.extractfile(member) as member_file:
+                                            with open(
+                                                dest_path,
+                                                "wb",
+                                            ) as out_file:
+                                                out_file.write(member_file.read())
+                                                st = os.fstat(out_file.fileno())
+                                                if hasattr(os, "fchmod"):
+                                                    # Windows has no fchmod.
+                                                    new_mode = st.st_mode | exec_mask
+                                                    os.fchmod(out_file.fileno(), new_mode)
+                                    elif member.isdir():
+                                        dest_path.mkdir(parents=True, exist_ok=True)
+                                    elif member.issym():
+                                        dest_path.symlink_to(member.linkname)
+                                    elif member.islnk():
+                                        # Hardlink: find the target file's destination path
+                                        link_target = member.linkname
+                                        for target_prefix in relpaths:
+                                            target_prefix_slash = target_prefix + "/"
+                                            if link_target.startswith(target_prefix_slash):
+                                                target_scoped_path = link_target[
+                                                    len(target_prefix_slash) :
+                                                ]
+                                                if self.flatten:
+                                                    target_dest_path = (
+                                                        self.output_path
+                                                        / PurePosixPath(target_scoped_path)
+                                                    )
+                                                else:
+                                                    target_dest_path = (
+                                                        self.output_path
+                                                        / target_prefix
+                                                        / PurePosixPath(target_scoped_path)
+                                                    )
+                                                os.link(target_dest_path, dest_path)
+                                                break
+                                        else:
+                                            raise IOError(
+                                                f"Hardlink target not in manifest: {member} -> {link_target}"
+                                            )
                                     else:
-                                        raise IOError(
-                                            f"Hardlink target not in manifest: {member} -> {link_target}"
-                                        )
-                                else:
-                                    raise IOError(f"Unhandled tar member: {member}")
+                                        raise IOError(f"Unhandled tar member: {member}")
                                 break
                         else:
                             raise IOError(
