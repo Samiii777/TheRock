@@ -10,4 +10,19 @@ include = [
 ]
 [components.dbg."core/clr/stage"]
 [components.dev."core/clr/stage"]
+# ROCR/HSAKMT runtime files are built internally by the clr subproject on
+# Windows (no standalone core-runtime stage), but they belong to the
+# core-runtime artifact. Exclude them here so each file is owned by exactly
+# one artifact (see https://github.com/ROCm/rocm-systems/issues/7923).
+exclude = [
+  "lib/cmake/hsa-runtime64/**",
+  "lib/cmake/hsakmt/**",
+  "lib/hsa-runtime64.lib",
+  "lib/hsakmt.lib",
+  "lib/wkmi.lib",
+  "include/hsa/**",
+]
 [components.doc."core/clr/stage"]
+exclude = [
+  "share/doc/rocr/**",
+]
