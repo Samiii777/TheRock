@@ -209,6 +209,32 @@ def commit_hipify(args: argparse.Namespace):
         commit_hipify_module(module_path)
 
 
+# ROCm/TheRock fix for rocm-systems#6354: PyTorch's bundled protobuf gates its
+# rc.exe workaround behind `if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")`. TheRock's
+# Windows PyTorch build compiles with clang-cl (compiler id == "Clang"), so the
+# workaround is skipped and add_definitions(/bigobj) leaks into rc.exe, failing
+# with `fatal error RC1106: invalid option: /bigobj` while compiling protobuf's
+# version.rc. We relax the gate to the CMake `MSVC` variable (TRUE for both cl.exe
+# and clang-cl) so the RC compile rule strips the C/C++-only <FLAGS>. This mirrors
+# the upstream protobuf fix and is idempotent + a no-op once PyTorch bumps protobuf.
+def patch_third_party_protobuf_rc(repo_dir):
+    protobuf_cmake = repo_dir / "third_party" / "protobuf" / "CMakeLists.txt"
+    if not protobuf_cmake.exists():
+        return
+    text = protobuf_cmake.read_text(encoding="utf-8")
+    buggy = 'if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")'
+    fixed = 'if (MSVC)  # patched by TheRock (rocm-systems#6354): also covers clang-cl'
+    if buggy not in text:
+        # Either already fixed upstream or a protobuf version without this gate.
+        return
+    text = text.replace(buggy, fixed)
+    protobuf_cmake.write_text(text, encoding="utf-8")
+    print(
+        f"++ Patched {protobuf_cmake} for rocm-systems#6354 "
+        "(protobuf rc.exe /bigobj gate -> MSVC variable)"
+    )
+
+
 def do_checkout(args: argparse.Namespace, custom_hipify=do_hipify):
     repo_dir: Path = args.checkout_dir
     check_git_dir = repo_dir / ".git"
@@ -260,6 +286,9 @@ def do_checkout(args: argparse.Namespace, custom_hipify=do_hipify):
             stdout_devnull=True,
         )
         git_config_ignore_submodules(repo_dir)
+
+        # Fix bundled protobuf rc.exe /bigobj failure under clang-cl (rocm-systems#6354).
+        patch_third_party_protobuf_rc(repo_dir)
 
     # Hipify.
     if args.hipify:
