@@ -634,15 +634,17 @@ def process_main_dependencies_kpack(
         ]
         # Filter deps without artifacts
         dep_list = filter_dependencies_by_artifacts(
-            dep_list, config.artifacts_dir, config.gfx_arch
+            dep_list, config.artifacts_dir, config.gfx_arch, config.gfxarch_list
         )
     elif not is_gfxarch_package(pkg_info, config.enable_kpack, config.artifacts_dir):
         # Non-gfxarch versioned package: use all dependencies directly
         # These packages don't have host/device split, so include everything
         dep_list = pkg_info.get(field_key, [])
-        # Filter deps without artifacts
+        # Filter deps without artifacts. This package is generic (gfx_arch=""),
+        # so gfxarch runtime deps (e.g. a devel pkg depending on its runtime)
+        # are kept when artifacts exist for any build arch.
         dep_list = filter_dependencies_by_artifacts(
-            dep_list, config.artifacts_dir, config.gfx_arch
+            dep_list, config.artifacts_dir, config.gfx_arch, config.gfxarch_list
         )
     else:
         # Device package: depend on host package + gfxarch dependencies with arch suffix
@@ -1001,7 +1003,7 @@ def resolve_versioned_dependencies(dep_list, config: PackageConfig, is_meta):
     elif (
         config.enable_kpack
         and not is_meta
-        and config.gfx_arch not in (GFX_HOST, GFX_META)
+        and config.gfx_arch not in ("", GFX_HOST, GFX_META)
     ):
         # Gfx-specific non-meta package:
         # dep_list[0] is the versioned-dependency (resolved as generic)
@@ -1017,6 +1019,28 @@ def resolve_versioned_dependencies(dep_list, config: PackageConfig, is_meta):
                 deps = f"{version_deps}, {gfx_deps}"
             else:
                 deps = version_deps
+    elif config.enable_kpack and not is_meta and config.gfx_arch == "":
+        # Generic (non-arch-specific) versioned package, e.g. a -devel/-dev
+        # package. Its gfxarch runtime dependency must resolve to the versioned
+        # META package (e.g. amdrocm-fft7.14), which itself pulls in the host and
+        # all device runtime packages. Resolving each dep generically against a
+        # GFX_META config yields the meta name for gfxarch deps and the plain
+        # versioned name for generic deps.
+        result_deps = []
+        meta_config = replace(config, versioned_pkg=True, gfx_arch=GFX_META)
+        for dep in dep_list:
+            dep_info = get_package_info(dep, raise_if_missing=False)
+            if dep_info and is_gfxarch_package(
+                dep_info, config.enable_kpack, config.artifacts_dir
+            ):
+                versioned = convert_to_versiondependency(
+                    [dep], meta_config, preserve_arch=True
+                )
+            else:
+                versioned = convert_to_versiondependency([dep], config)
+            if versioned:
+                result_deps.append(versioned)
+        deps = ", ".join(result_deps)
     else:
         # Normal path: convert dependencies and add version suffix
         deps = convert_to_versiondependency(dep_list, config)
@@ -1144,7 +1168,7 @@ def filter_archs_with_artifacts(
 
 
 def filter_dependencies_by_artifacts(
-    dep_list: list, artifacts_dir: Path, gfx_arch: str
+    dep_list: list, artifacts_dir: Path, gfx_arch: str, gfxarch_list=None
 ) -> list:
     """Filter dependency list to exclude packages without artifacts.
 
@@ -1155,9 +1179,19 @@ def filter_dependencies_by_artifacts(
     dep_list: List of dependency package names
     artifacts_dir: Directory where artifacts are stored
     gfx_arch: Target architecture to check
+    gfxarch_list: Full list of build architectures. Used when the depending
+        package is not itself arch-specific (gfx_arch is empty / host / meta):
+        a gfxarch dependency is kept when artifacts exist for ANY of these
+        architectures, since generic devel/host packages must still pull in
+        their runtime counterpart regardless of a single gfx arch.
 
     Returns: Filtered dependency list
     """
+    # A generic/non-gfx-specific consumer (empty gfx_arch, host or meta) has no
+    # single architecture of its own. For such consumers, a gfxarch dependency
+    # is available as long as it has artifacts for at least one build arch.
+    consumer_is_arch_specific = gfx_arch not in ("", GFX_HOST, GFX_META)
+
     filtered = []
     for dep in dep_list:
         dep_info = get_package_info(dep, raise_if_missing=False)
@@ -1173,8 +1207,19 @@ def filter_dependencies_by_artifacts(
             filtered.append(dep)
             continue
 
-        # Check if gfxarch package has artifacts
-        if has_artifact_for_arch(dep, artifacts_dir, gfx_arch):
+        # Check if gfxarch package has artifacts.
+        if consumer_is_arch_specific:
+            dep_available = has_artifact_for_arch(dep, artifacts_dir, gfx_arch)
+        else:
+            # Consumer is generic (e.g. a devel package built with gfx_arch="").
+            # Keep the gfxarch runtime dependency if it exists for any build arch.
+            archs_to_check = gfxarch_list or ()
+            dep_available = any(
+                has_artifact_for_arch(dep, artifacts_dir, arch)
+                for arch in archs_to_check
+            )
+
+        if dep_available:
             filtered.append(dep)
         else:
             print(f"WORKAROUND: Excluding {dep} (no artifacts for {gfx_arch})")
