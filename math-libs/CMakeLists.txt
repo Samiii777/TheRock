@@ -595,6 +595,25 @@ endif()
 # resolved value to the parent scope where ml-libs will inherit it.
 set(_ck_enabled ${_ck_enabled} PARENT_SCOPE)
 
+# hipTensor enablement is computed independently of _ck_enabled. hipTensor and
+# composable_kernel maintain DIFFERENT per-family EXCLUDE_TARGET_PROJECTS entries
+# in cmake/therock_amdgpu_targets.cmake (hipTensor tracked by
+# https://github.com/ROCm/TheRock/issues/2074, CK by #1245/#4836). If hipTensor
+# were gated on _ck_enabled, a family where CK is supported (so _ck_enabled stays
+# ON) but hipTensor is excluded would trigger hipTensor's build with an empty
+# GPU_TARGETS and fail. Instead, filter hipTensor against its own excludes and
+# only declare it when supported targets remain. See rocm-libraries#6268.
+set(_hiptensor_enabled ${THEROCK_ENABLE_HIPTENSOR})
+if(_hiptensor_enabled)
+  therock_filter_amdgpu_targets(_hiptensor_targets hipTensor ${THEROCK_AMDGPU_TARGETS})
+  if(NOT _hiptensor_targets)
+    message(STATUS
+      "hipTensor: no supported gfx targets remain after filtering "
+      "(THEROCK_AMDGPU_TARGETS='${THEROCK_AMDGPU_TARGETS}'); skipping subproject.")
+    set(_hiptensor_enabled OFF)
+  endif()
+endif()
+
 if(_ck_enabled)
   ##############################################################################
   # Composable_kernel
@@ -640,12 +659,37 @@ if(_ck_enabled)
   )
 endif()
 
-if(_ck_enabled AND THEROCK_ENABLE_HIPTENSOR)
+if(_hiptensor_enabled)
   ##############################################################################
   # hipTensor
   ##############################################################################
 
+  # hipTensor's DEVICE build genuinely needs composable_kernel. When CK is
+  # available for this configuration, build the real device library and depend on
+  # CK. When CK is NOT available (a family where hipTensor is supported but CK is
+  # excluded), depend on neither and force GPU_TARGETS to empty so hipTensor falls
+  # back to its host-only stub (links only hip::host, needs no CK). This keeps
+  # hipTensor enablement fully decoupled from CK while never triggering a device
+  # build with an empty GPU_TARGETS. See rocm-libraries#6268.
+  set(_hiptensor_ck_dep)
+  set(_hiptensor_disable_targets)
+  set(_hiptensor_gpu_targets_arg)
+  if(_ck_enabled)
+    set(_hiptensor_ck_dep composable_kernel)
+  else()
+    message(STATUS
+      "hipTensor: composable_kernel is not available for this configuration; "
+      "building the host-only stub (GPU_TARGETS forced empty).")
+    # Explicitly-empty GPU_TARGETS triggers HIPTENSOR_DISABLE_DEVICE=ON in the
+    # hipTensor CMakeLists (stub build). DISABLE_AMDGPU_TARGETS prevents the
+    # subproject toolchain from FORCE-setting GPU_TARGETS from the filtered list,
+    # so our explicit empty value below is honored.
+    set(_hiptensor_disable_targets DISABLE_AMDGPU_TARGETS)
+    set(_hiptensor_gpu_targets_arg "-DGPU_TARGETS=")
+  endif()
+
   therock_cmake_subproject_declare(hipTensor
+    ${_hiptensor_disable_targets}
     EXTERNAL_SOURCE_DIR "${THEROCK_ROCM_LIBRARIES_SOURCE_DIR}/projects/hiptensor"
     BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/hipTensor"
     BACKGROUND_BUILD
@@ -656,6 +700,7 @@ if(_ck_enabled AND THEROCK_ENABLE_HIPTENSOR)
       "-DHIPTENSOR_BUILD_TESTS=$<BOOL:${THEROCK_BUILD_TESTING}>"
       -DHIPTENSOR_USE_SYSTEM_GOOGLETEST=ON # Use therock-googletest
       -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON # Needed for Ninja build
+      ${_hiptensor_gpu_targets_arg}
     CMAKE_INCLUDES
       therock_explicit_finders.cmake
     COMPILER_TOOLCHAIN
@@ -663,7 +708,7 @@ if(_ck_enabled AND THEROCK_ENABLE_HIPTENSOR)
     BUILD_DEPS
       rocm-cmake
       therock-googletest
-      composable_kernel
+      ${_hiptensor_ck_dep}
     RUNTIME_DEPS
       hip-clr
   )
