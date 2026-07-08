@@ -6,6 +6,17 @@ if(THEROCK_ENABLE_COMPILER)
     set(THEROCK_BUILD_COMGR_TESTS ${THEROCK_BUILD_TESTING})
   endif()
 
+  # Comgr's gtest suite (test-unit: HotswapElfTests, HotswapMCTests,
+  # RaiserScaffoldingTests) discovers googletest from the LLVM install. That
+  # only works when amd-llvm is built with LLVM_INCLUDE_TESTS=ON and installs
+  # its gtest into lib/llvm via LLVM_INSTALL_GTEST=ON. LLVM_INCLUDE_TESTS is
+  # therefore required whenever LLVM's own tests OR Comgr's tests are enabled.
+  if(THEROCK_ENABLE_LLVM_TESTS OR THEROCK_BUILD_COMGR_TESTS)
+    set(_llvm_include_tests ON)
+  else()
+    set(_llvm_include_tests OFF)
+  endif()
+
   ##############################################################################
   # amd-llvm
   # Everything built as part of LLVM installs to lib/llvm
@@ -77,7 +88,11 @@ if(THEROCK_ENABLE_COMPILER)
       -DLIBCXXABI_ENABLE_STATIC=ON
 
       # Features
-      -DLLVM_INCLUDE_TESTS=${THEROCK_ENABLE_LLVM_TESTS}
+      -DLLVM_INCLUDE_TESTS=${_llvm_include_tests}
+      # Install LLVM's googletest into lib/llvm so Comgr's standalone build
+      # can discover it and enable its gtest (test-unit) suite. Only needed
+      # when Comgr tests are enabled.
+      -DLLVM_INSTALL_GTEST=${THEROCK_BUILD_COMGR_TESTS}
       -DTHEROCK_BUILD_COMGR_TESTS=${THEROCK_BUILD_COMGR_TESTS}
       -DLLVM_ENABLE_ZLIB=FORCE_ON
       -DLLVM_ENABLE_Z3_SOLVER=OFF
@@ -213,6 +228,14 @@ if(THEROCK_ENABLE_COMPILER)
         "${CMAKE_CTEST_COMMAND}"
         --test-dir "${CMAKE_BINARY_DIR}/compiler/amd-comgr/build"
         --output-on-failure
+      # Run Comgr's gtest (test-unit) suite: HotswapElfTests, HotswapMCTests,
+      # RaiserScaffoldingTests. This target is only defined when Comgr's
+      # test-unit/CMakeLists.txt discovers googletest (provided here via the
+      # amd-llvm LLVM_INSTALL_GTEST=ON install above).
+      COMMAND
+        "${CMAKE_COMMAND}"
+        --build "${CMAKE_BINARY_DIR}/compiler/amd-comgr/build"
+        --target test-unit
     )
   endif()
 
