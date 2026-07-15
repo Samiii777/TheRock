@@ -52,11 +52,89 @@ from _therock_utils.storage_location import StorageLocation
 from _therock_utils.workflow_outputs import WorkflowOutputRoot
 
 
+def _rpm_locations_in_repodata(repodata_dir):
+    """Return the set of package <location href="..."> basenames recorded in a
+    repo's primary metadata.
+
+    This tells us which .rpm files a given repodata actually indexes, so we can
+    detect .rpm objects that are present in S3 but missing from the metadata
+    (which happens on retried/multi-attempt runs where a package was uploaded on
+    a prior attempt but its metadata was never recorded).
+    """
+    import glob
+    import gzip
+    import re
+
+    repodata_dir = Path(repodata_dir)
+    if not repodata_dir.is_dir():
+        return set()
+
+    primary_candidates = sorted(glob.glob(str(repodata_dir / "*primary.xml*")))
+    if not primary_candidates:
+        return set()
+
+    primary = primary_candidates[0]
+    try:
+        if primary.endswith(".gz"):
+            with gzip.open(primary, "rt", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        elif primary.endswith(".zst"):
+            try:
+                import zstandard
+
+                with open(primary, "rb") as f:
+                    content = (
+                        zstandard.ZstdDecompressor()
+                        .stream_reader(f)
+                        .read()
+                        .decode("utf-8", errors="replace")
+                    )
+            except Exception:
+                return set()
+        else:
+            with open(primary, "rt", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+    except Exception:
+        return set()
+
+    locations = set()
+    for m in re.finditer(r'<location[^>]*\bhref="([^"]+)"', content):
+        locations.add(Path(m.group(1)).name)
+    return locations
+
+
+def _list_rpm_objects_in_s3(s3, bucket, prefix):
+    """List every .rpm object under {prefix}/x86_64/ in S3.
+
+    Returns a dict mapping the rpm basename -> full S3 key. This is the
+    authoritative source of truth for which packages actually exist in the repo.
+    """
+    rpm_objects = {}
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/x86_64/"):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith(".rpm"):
+                    rpm_objects[Path(key).name] = key
+    except Exception as e:
+        print(f"⚠️  Could not list existing RPM objects in S3: {e}")
+    return rpm_objects
+
+
 def regenerate_rpm_metadata_from_s3(s3, bucket, prefix, uploaded_packages):
     """Regenerate RPM repository metadata using merge approach.
 
     Downloads existing repodata from S3, generates metadata for new packages,
     merges them using mergerepo_c, and uploads the result back to S3.
+
+    Additionally heals the repo on every run: cross-checks the full list of .rpm
+    objects that actually exist in S3 against the packages indexed by the old
+    metadata, and pulls in any .rpm present in S3 but missing from the metadata.
+    This prevents the "nothing provides <pkg>" DNF failure on retried
+    (multi-attempt) CI runs where a package uploaded on a prior attempt is
+    deduplicated on the retry and would otherwise never enter the merged
+    repodata (TheRock #6540).
 
     Args:
         s3: boto3 S3 client
@@ -112,30 +190,65 @@ def regenerate_rpm_metadata_from_s3(s3, bucket, prefix, uploaded_packages):
         except Exception as e:
             print(f"⚠️  No existing repodata found (new repo?): {e}")
 
-        # Step 2: Generate repodata for NEW packages only (actually uploaded ones)
-        rpm_packages = [p for p in uploaded_packages if p.endswith(".rpm")]
-        if rpm_packages:
-            print(
-                f"Generating metadata for {len(rpm_packages)} uploaded RPM packages..."
-            )
-            # Copy uploaded RPMs to temp dir
-            new_arch_dir = new_repo_dir / "x86_64"
-            new_arch_dir.mkdir(parents=True, exist_ok=True)
-            for rpm_file in rpm_packages:
-                shutil.copy2(rpm_file, new_arch_dir / Path(rpm_file).name)
+        # Step 2: Determine which RPMs must be (re)indexed.
+        #
+        # The set that ends up in the repodata is the union of:
+        #   (a) packages actually uploaded this run, and
+        #   (b) packages that exist as .rpm objects in S3 but are NOT already
+        #       indexed by the old metadata ("orphans").
+        #
+        # (b) is the fix for TheRock #6540: on a retried/multi-attempt run,
+        # already-present RPMs are deduplicated (skipped) and hence absent from
+        # `uploaded_packages`. If a prior attempt uploaded them but never got
+        # their metadata recorded, they would be silently dropped from the
+        # merged repodata, producing "nothing provides <pkg>" during DNF
+        # install. By reconciling against the authoritative list of .rpm objects
+        # in S3 on every run, the repo self-heals.
+        new_arch_dir = new_repo_dir / "x86_64"
+        new_arch_dir.mkdir(parents=True, exist_ok=True)
 
-            # Generate repodata for new packages with clean paths (no baseurl)
+        indexed_by_old = _rpm_locations_in_repodata(old_repodata_dir)
+
+        rpm_packages = [p for p in uploaded_packages if p.endswith(".rpm")]
+        staged_names = set()
+        for rpm_file in rpm_packages:
+            name = Path(rpm_file).name
+            shutil.copy2(rpm_file, new_arch_dir / name)
+            staged_names.add(name)
+
+        all_rpm_objects = _list_rpm_objects_in_s3(s3, bucket, prefix)
+        orphan_rpms = {
+            name: key
+            for name, key in all_rpm_objects.items()
+            if name not in indexed_by_old and name not in staged_names
+        }
+        if orphan_rpms:
+            print(
+                f"⚠️  Found {len(orphan_rpms)} .rpm in S3 missing from metadata "
+                f"(likely a prior retry) — healing repo by re-indexing them:"
+            )
+            for name, key in sorted(orphan_rpms.items()):
+                local_file = new_arch_dir / name
+                s3.download_file(bucket, key, str(local_file))
+                staged_names.add(name)
+                print(f"  Recovered: {name}")
+
+        if staged_names:
+            print(
+                f"Generating metadata for {len(staged_names)} RPM packages "
+                f"({len(rpm_packages)} uploaded, {len(orphan_rpms)} recovered)..."
+            )
+            # Generate repodata for these packages with clean paths (no baseurl)
             run_command(
                 "createrepo_c --no-database --simple-md-filenames .",
                 cwd=str(new_arch_dir),
             )
-            print("✅ Generated metadata for uploaded packages")
+            print("✅ Generated metadata for new + recovered packages")
         else:
-            print("No new RPM packages uploaded (all deduplicated)")
-            # Still need to ensure old metadata is preserved!
+            print("No new or missing RPM packages (metadata already complete)")
+            # Nothing to add; just preserve the existing metadata.
             if repodata_files:
                 print("Preserving existing repodata...")
-                # Just re-upload the existing repodata we downloaded
                 for metadata_file in old_repodata_dir.iterdir():
                     if metadata_file.is_file():
                         s3_key = f"{prefix}/x86_64/repodata/{metadata_file.name}"
