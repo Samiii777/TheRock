@@ -104,6 +104,22 @@ skip_tests = {
             "test_terminate_handler_on_crash",  # flaky !! hangs forever or works... can need up to 30 sec to pass
         ],
     },
+    "gfx1151": {
+        "torch": [
+            # test_int64_upsample3d needs ~63.3 GiB VRAM to run: input tensor
+            # (1,256,16,720,1280) bfloat16 = 7.03 GiB plus the 8x nearest-3d
+            # output = 56.25 GiB. The upstream @largeTensorTest('56GB') guard only
+            # reserves the 56 GiB output size, so on gfx1151 (Strix Halo, ~64 GiB
+            # unified VRAM carveout) the guard passes whenever >=56 GiB is free but
+            # the op still OOMs once any prior test holds a few GiB. This makes the
+            # test skip/fail inconsistently across shards (skips on py3.13, OOMs on
+            # py3.12/py3.14). The test targets large datacenter GPUs and cannot fit
+            # on a 64 GiB unified-memory APU, so skip it here.
+            # torch.OutOfMemoryError: HIP out of memory. Tried to allocate 56.25 GiB.
+            # https://github.com/ROCm/TheRock/issues/6567
+            "test_int64_upsample3d_cuda_bfloat16",
+        ],
+    },
     "windows": {
         "torch": [
             # Windows fatal exception: access violation
