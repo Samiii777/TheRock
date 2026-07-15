@@ -4,6 +4,14 @@
 skip_tests = {
     "common": {
         "cuda": [
+            # TestCuda - conflicts with how our test script and runners are
+            # configured. Skipped in generic.py only under "windows"/"cuda", so
+            # it is not filtered out on Linux. See
+            # https://github.com/ROCm/TheRock/issues/6563
+            "test_hip_device_count",
+            # TestCudaAllocator - passes on single run, crashes if run in a
+            # group. TypeError: 'CustomDecompTable' object is not a mapping
+            "test_memory_compile_regions",
             # RuntimeError: Error building extension 'dummy_allocator_v1'
             "test_mempool_limited_memory_with_allocator",
             # AssertionError: Scalars are not equal!
