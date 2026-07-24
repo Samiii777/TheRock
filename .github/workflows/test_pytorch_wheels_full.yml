@@ -322,6 +322,7 @@ jobs:
 
       - name: (Linux) Run PyTorch full test suite
         if: ${{ runner.os == 'Linux' }}
+        timeout-minutes: 120
         run: |
           python ./external-builds/pytorch/run_pytorch_tests_full.py \
             --device-query "${{ inputs.device_query }}" \
@@ -344,6 +345,7 @@ jobs:
       # See https://github.com/ROCm/TheRock/issues/999.
       - name: (Windows) Run PyTorch tests
         if: ${{ runner.os == 'Windows'}}
+        timeout-minutes: 120
         continue-on-error: true
         run: |
           python ./external-builds/pytorch/run_pytorch_tests.py -- \

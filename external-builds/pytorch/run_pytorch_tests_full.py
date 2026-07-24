@@ -120,6 +120,7 @@ EXCLUDED_TEST_MODULES: list[str] = [
     "inductor/test_compiled_autograd",
     "dynamo/test_dynamic_shapes",
     "functorch/test_control_flow",
+    "distributed/_tools/test_memory_tracker",  # hangs without producing output, see #6651
 ]
 
 # Inductor config: mirrors upstream test_inductor_shard() in .ci/pytorch/test.sh.
