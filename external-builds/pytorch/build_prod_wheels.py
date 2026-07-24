@@ -165,7 +165,11 @@ LLVM_BASE_URL = "https://oaitriton.blob.core.windows.net/public/llvm-builds"
 LINUX_LIBRARY_PRELOADS = [
     "amd_comgr",
     "amdhip64",
-    "rocprofiler-sdk",  # Linux only: needed by torch since kineto uses rocprofiler-sdk.
+    # rocprofiler-sdk is intentionally not preloaded here: force-loading the
+    # wheel-bundled SDK core lib at `import torch` conflicts with an externally
+    # launched rocprofv3 that has already locked configuration, producing
+    # ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED. librocprofiler-sdk.so.1 is
+    # still resolved via RUNPATH when kineto actually uses it.
     "rocprofiler-sdk-roctx",  # Linux only for the moment.
     # TODO: Remove roctracer64 and roctx64 once fully switched to rocprofiler-sdk.
     "roctracer64",  # Linux only for the moment.
