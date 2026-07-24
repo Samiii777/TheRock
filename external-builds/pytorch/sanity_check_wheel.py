@@ -37,9 +37,14 @@ def main():
         print(f"ERROR: {wheel_dir} is not a directory")
         sys.exit(1)
 
-    # Expected names: torch, torchaudio, torchvision
-    for expected_name in ["torch", "torchaudio", "torchvision"]:
+    # torch is mandatory; torchaudio and torchvision may be skipped by a build.
+    required_names = ["torch"]
+    optional_names = ["torchaudio", "torchvision"]
+    for expected_name in required_names + optional_names:
         wheels = list(wheel_dir.glob(f"{expected_name}-*.whl"))
+        if not wheels and expected_name in required_names:
+            print(f"ERROR: no {expected_name} wheel found in {wheel_dir}")
+            sys.exit(1)
         for wheel in wheels:
             check_wheel(wheel, expected_name)
 
