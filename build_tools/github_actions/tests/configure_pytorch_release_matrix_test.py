@@ -196,6 +196,29 @@ class ConfigurePytorchReleaseMatrixTest(unittest.TestCase):
                     # the generator emits that key for every row.
                     self.assertEqual(matrix_references - set(row), set())
 
+    def test_gfx90c_excluded_from_nightly(self):
+        # PyTorch nightly's vendored composable kernel does not support gfx90c,
+        # so it must be filtered out while supported families are kept.
+        # See https://github.com/ROCm/TheRock/issues/6805.
+        matrix = m.generate_pytorch_matrix_for_release_type(
+            release_type="nightly",
+            python_versions=["3.12"],
+            pytorch_git_refs=["nightly"],
+            amdgpu_families="gfx90c;gfx94X-dcgpu",
+            platform="linux",
+        )
+
+        self.assertEqual(
+            matrix,
+            [
+                {
+                    "python_version": "3.12",
+                    "pytorch_git_ref": "nightly",
+                    "amdgpu_families": "gfx94X-dcgpu",
+                }
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
