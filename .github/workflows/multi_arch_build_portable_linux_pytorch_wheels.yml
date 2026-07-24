@@ -51,11 +51,11 @@ on:
         type: string
         required: true
       rocm_package_find_links_url:
-        description: URL for pip --find-links to install ROCm packages (flat page; use this OR rocm_package_index_url)
+        description: URL for pip --find-links to install ROCm packages (flat page; set this OR rocm_package_index_url, not both)
         type: string
         default: ""
       rocm_package_index_url:
-        description: URL for pip --index-url to install ROCm packages (PEP 503 index, e.g. repo.amd.com; use this OR rocm_package_find_links_url)
+        description: URL for pip --index-url to install ROCm packages (PEP 503 index; set this OR rocm_package_find_links_url, not both)
         type: string
         default: ""
       release_type:
@@ -63,11 +63,11 @@ on:
         type: string
         required: true
       repository:
-        description: "Repository to checkout. Defaults to github.repository."
+        description: "TheRock repository to checkout for the build scripts (not the PyTorch source; use pytorch_git_ref for the PyTorch branch). Defaults to github.repository."
         type: string
         default: ""
       ref:
-        description: "Branch, tag, or SHA to checkout. Defaults to the triggering ref."
+        description: "TheRock branch, tag, or SHA to checkout (not the PyTorch source; use pytorch_git_ref for the PyTorch branch). Defaults to the triggering ref."
         type: string
         default: ""
       cache_type:
@@ -109,13 +109,13 @@ on:
         type: string
         required: true
       rocm_package_find_links_url:
-        description: URL for pip --find-links to install ROCm packages (flat page; use this OR rocm_package_index_url)
+        description: URL for pip --find-links to install ROCm packages (flat page; set this OR rocm_package_index_url, not both)
         type: string
         default: ""
       rocm_package_index_url:
-        description: URL for pip --index-url to install ROCm packages (PEP 503 index, e.g. repo.amd.com; use this OR rocm_package_find_links_url)
+        description: URL for pip --index-url to install ROCm packages (PEP 503 index; set this OR rocm_package_find_links_url, not both)
         type: string
-        default: ""
+        default: "https://rocm.nightlies.amd.com/whl-multi-arch/"
       release_type:
         description: 'Release type; developer-triggered jobs should use "dev".'
         type: choice
@@ -123,11 +123,11 @@ on:
           - dev
         default: dev
       repository:
-        description: "Repository to checkout. Defaults to github.repository."
+        description: "TheRock repository to checkout for the build scripts (not the PyTorch source; use pytorch_git_ref for the PyTorch branch). Defaults to github.repository."
         type: string
         default: ""
       ref:
-        description: "Branch, tag, or SHA to checkout. Defaults to the triggering ref."
+        description: "TheRock branch, tag, or SHA to checkout (not the PyTorch source; use pytorch_git_ref for the PyTorch branch). Defaults to the triggering ref."
         type: string
         default: ""
       cache_type:
