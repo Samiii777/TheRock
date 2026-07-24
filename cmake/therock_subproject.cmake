@@ -1520,11 +1520,16 @@ function(_therock_cmake_subproject_collect_build_deps
     get_target_property(_link_dir "${target_name}" THEROCK_INTERFACE_LINK_DIRS)
     list(APPEND _link_dirs ${_link_dir})
 
-    # Depend on stage installation.
+    # Depend on stage installation: any dir a dependency exposes (include,
+    # link, program or pkg-config) is a configure/build input, so the consumer
+    # must order after the dependency's stage step regardless of which dirs it
+    # provides.
+    list(APPEND _transitive_configure_depend_files "${_stamp_dir}/stage.stamp")
+
+    # Program dirs.
     get_target_property(_program_dir "${target_name}" THEROCK_INTERFACE_PROGRAM_DIRS)
     if(_program_dir)
       list(APPEND _program_dirs ${_program_dir})
-      list(APPEND _transitive_configure_depend_files "${_stamp_dir}/stage.stamp")
     endif()
 
     # PkgConfig dirs.
