@@ -58,8 +58,15 @@ update_library_links "$PREFIX/lib/librocm_sysdeps_elf.so" "libelf.so"
 update_library_links "$PREFIX/lib/librocm_sysdeps_asm.so" "libasm.so"
 update_library_links "$PREFIX/lib/librocm_sysdeps_dw.so" "libdw.so"
 
-# pc files are not output with a relative prefix. Sed it to relative.
-sed -i -E 's|^prefix=.+|prefix=${pcfiledir}/../..|' $PREFIX/lib/pkgconfig/*.pc
+# pc files are not output with a relative prefix. Sed them to relative.
+# autotools writes an absolute prefix and an independent absolute libdir/exec_prefix,
+# so all of them must be anchored to ${pcfiledir} to stay relocatable.
+sed -i -E \
+    -e 's|^prefix=.+|prefix=${pcfiledir}/../..|' \
+    -e 's|^exec_prefix=.+|exec_prefix=${prefix}|' \
+    -e 's|^libdir=.+|libdir=${exec_prefix}/lib|' \
+    -e 's|^includedir=.+|includedir=${prefix}/include|' \
+    $PREFIX/lib/pkgconfig/*.pc
 
 # We don't need old v0 compat libs.
 rm -f $PREFIX/lib/*-0.so
