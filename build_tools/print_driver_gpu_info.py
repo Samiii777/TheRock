@@ -26,6 +26,7 @@ from typing import List, Optional
 
 AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES")
 unsupported_amdsmi_families = ["gfx1151"]
+COMMAND_TIMEOUT_SECONDS = int(os.getenv("SANITY_CHECK_COMMAND_TIMEOUT", "60"))
 
 
 def log(*args, **kwargs):
@@ -49,10 +50,19 @@ def run_command(args: List[str | Path], cwd: Optional[Path] = None) -> None:
             text=True,
             check=False,
             stdin=subprocess.DEVNULL,
+            timeout=COMMAND_TIMEOUT_SECONDS,
         )
         log(proc.stdout.rstrip())
     except FileNotFoundError:
         log(f"{args[0]}: command not found")
+    except subprocess.TimeoutExpired as e:
+        if e.output:
+            partial = e.output.decode() if isinstance(e.output, bytes) else e.output
+            log(partial.rstrip())
+        log(
+            f"{args[0]}: timed out after {COMMAND_TIMEOUT_SECONDS}s "
+            "(likely runner/GPU not ready)"
+        )
 
 
 def run_command_with_search(
