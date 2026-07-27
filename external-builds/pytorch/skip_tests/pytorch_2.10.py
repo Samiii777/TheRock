@@ -104,6 +104,14 @@ skip_tests = {
             "test_terminate_handler_on_crash",  # flaky !! hangs forever or works... can need up to 30 sec to pass
         ],
     },
+    "gfx115": {
+        "torch": [
+            # Flaky on unified-memory APUs: @largeTensorTest("56GB") gates on free
+            # memory, but the test needs input (~7.5GB) + output (56.25GiB) at once,
+            # so the gate passes while the allocation OOMs. See ROCm/TheRock#6567.
+            "test_int64_upsample3d",
+        ],
+    },
     "windows": {
         "torch": [
             # Windows fatal exception: access violation
