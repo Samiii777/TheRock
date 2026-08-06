@@ -11,10 +11,14 @@ from unittest import mock
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 
+import _therock_utils.s3_buckets as s3_buckets_module
 from _therock_utils.s3_buckets import (
+    CdnRule,
     get_artifacts_bucket_config,
     get_artifacts_bucket_config_for_workflow_run,
     get_release_bucket_config,
+    load_bucket_config_file,
+    resolve_public_url,
 )
 
 
@@ -300,6 +304,126 @@ class TestGetArtifactsBucketConfigForWorkflowRun(unittest.TestCase):
         )
         self.mock_api.assert_not_called()
         self.assertEqual(config.name, "therock-ci-artifacts")
+
+
+# ---------------------------------------------------------------------------
+# CdnRule and public URL resolution
+# ---------------------------------------------------------------------------
+
+
+class TestCdnRule(unittest.TestCase):
+    def test_key_prefix_must_end_with_slash(self):
+        with self.assertRaises(ValueError):
+            CdnRule("deb", "https://cdn.example.com/")
+
+    def test_empty_key_prefix_is_allowed(self):
+        rule = CdnRule("", "https://cdn.example.com/whl/")
+        self.assertEqual(rule.key_prefix, "")
+
+    def test_url_prefix_must_be_https(self):
+        with self.assertRaises(ValueError):
+            CdnRule("", "http://cdn.example.com/")
+
+    def test_url_prefix_trailing_slash_normalized(self):
+        rule = CdnRule("", "https://cdn.example.com/whl/")
+        self.assertEqual(rule.url_prefix, "https://cdn.example.com/whl")
+
+
+class TestResolvePublicUrl(unittest.TestCase):
+    def test_bucket_wide_cdn(self):
+        self.assertEqual(
+            resolve_public_url("therock-nightly-python", "a/b.whl"),
+            "https://rocm.nightlies.amd.com/whl-multi-arch/a/b.whl",
+        )
+
+    def test_longest_prefix_wins(self):
+        self.assertEqual(
+            resolve_public_url("therock-nightly-packages", "deb/pool/x.deb"),
+            "https://rocm.nightlies.amd.com/packages-multi-arch/deb/pool/x.deb",
+        )
+        self.assertEqual(
+            resolve_public_url("therock-nightly-packages", "rpm/el9/x.rpm"),
+            "https://rocm.nightlies.amd.com/packages-multi-arch/rpm/el9/x.rpm",
+        )
+
+    def test_no_matching_rule_falls_back_to_raw_s3(self):
+        self.assertEqual(
+            resolve_public_url("therock-nightly-packages", "misc/x"),
+            "https://therock-nightly-packages.s3.amazonaws.com/misc/x",
+        )
+
+    def test_unknown_bucket_falls_back_to_raw_s3(self):
+        self.assertEqual(
+            resolve_public_url("therock-ci-artifacts", "a/b"),
+            "https://therock-ci-artifacts.s3.amazonaws.com/a/b",
+        )
+
+
+# ---------------------------------------------------------------------------
+# JSON bucket registry file
+# ---------------------------------------------------------------------------
+
+
+class TestLoadBucketConfigFile(unittest.TestCase):
+    def setUp(self):
+        self._saved = dict(s3_buckets_module._BUCKET_CONFIGS_BY_NAME)
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        s3_buckets_module._BUCKET_CONFIGS_BY_NAME.clear()
+        s3_buckets_module._BUCKET_CONFIGS_BY_NAME.update(self._saved)
+
+    def _write(self, entries):
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(entries, f)
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+        return f.name
+
+    def test_additive_merge_new_bucket(self):
+        path = self._write(
+            [
+                {
+                    "name": "my-org-artifacts",
+                    "cdn_rules": [
+                        {"key_prefix": "", "url_prefix": "https://cdn.my-org.com/"}
+                    ],
+                }
+            ]
+        )
+        load_bucket_config_file(path)
+        self.assertEqual(
+            resolve_public_url("my-org-artifacts", "x/y"),
+            "https://cdn.my-org.com/x/y",
+        )
+
+    def test_override_requires_explicit_flag(self):
+        path = self._write([{"name": "therock-nightly-python", "cdn_rules": []}])
+        with self.assertRaises(ValueError):
+            load_bucket_config_file(path)
+
+    def test_override_true_shadows_builtin(self):
+        path = self._write(
+            [
+                {
+                    "name": "therock-nightly-python",
+                    "override": True,
+                    "cdn_rules": [
+                        {"key_prefix": "", "url_prefix": "https://new.example.com/"}
+                    ],
+                }
+            ]
+        )
+        load_bucket_config_file(path)
+        self.assertEqual(
+            resolve_public_url("therock-nightly-python", "a"),
+            "https://new.example.com/a",
+        )
+
+    def test_unknown_key_is_error(self):
+        path = self._write([{"name": "zzz", "bogus": 1}])
+        with self.assertRaises(ValueError):
+            load_bucket_config_file(path)
 
 
 if __name__ == "__main__":

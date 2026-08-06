@@ -100,6 +100,14 @@ Developer-facing documentation and manual installs should use the CDN URLs;
 CI may read the backing S3 buckets directly to avoid CloudFront data-transfer
 charges.
 
+This CDN mapping is also encoded as machine-readable `CdnRule`s on each
+`S3BucketConfig` in
+[`build_tools/_therock_utils/s3_buckets.py`](/build_tools/_therock_utils/s3_buckets.py);
+use `StorageLocation.public_url` (or `resolve_public_url`) to resolve a public
+URL instead of re-deriving one. Repositories reusing these build tools against
+their own buckets can register them via a JSON file named by
+`--bucket-config-file` / `THEROCK_S3_BUCKETS_FILE`.
+
 | Bucket                                                                                   | Contents        | IAM role             | CDN                                                                                                                                                                                     |
 | ---------------------------------------------------------------------------------------- | --------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`therock-dev-artifacts`](https://therock-dev-artifacts.s3.amazonaws.com/)               | Build outputs   | `therock-dev`        | —                                                                                                                                                                                       |

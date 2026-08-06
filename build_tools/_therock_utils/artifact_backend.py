@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Set
 import os
+import re
 import shutil
 
 from .workflow_outputs import WorkflowOutputRoot
@@ -330,20 +331,145 @@ class S3Backend(ArtifactBackend):
             return False
 
 
+class HTTPBackend(ArtifactBackend):
+    """Read-only backend that fetches artifacts over plain HTTPS.
+
+    Requires no credentials and no boto3. URLs are resolved through
+    ``StorageLocation.public_url`` so this backend targets a CDN wherever one is
+    configured and raw S3 otherwise. ``list_artifacts`` parses the generated
+    directory index; ``upload_artifact`` and ``copy_artifact`` are unsupported.
+    """
+
+    def __init__(self, output_root: WorkflowOutputRoot):
+        self.output_root = output_root
+
+    @property
+    def base_uri(self) -> str:
+        return self.output_root.root().public_url
+
+    def _get(self, url: str) -> bytes:
+        import urllib.request
+
+        with urllib.request.urlopen(url) as response:
+            return response.read()
+
+    def list_artifacts(self, name_filter: Optional[str] = None) -> List[str]:
+        """List artifacts by parsing the generated directory index."""
+        import urllib.error
+
+        index_url = self.output_root.artifact_index().public_url
+        try:
+            body = self._get(index_url).decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return []
+            raise
+
+        artifacts = set()
+        for href in _iter_index_hrefs(body):
+            filename = href.rstrip("/").split("/")[-1]
+            if not _is_artifact_archive(filename):
+                continue
+            if name_filter is not None and not filename.startswith(f"{name_filter}_"):
+                continue
+            artifacts.add(filename)
+        return sorted(artifacts)
+
+    def download_artifact(self, artifact_key: str, dest_path: Path) -> None:
+        """Download an artifact over HTTPS, verifying its sha256 companion."""
+        import urllib.error
+
+        url = self.output_root.artifact(artifact_key).public_url
+        try:
+            data = self._get(url)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise FileNotFoundError(f"Artifact not found: {url}") from e
+            raise
+
+        expected = self._fetch_expected_sha256(artifact_key)
+        if expected is not None:
+            import hashlib
+
+            actual = hashlib.sha256(data).hexdigest()
+            if actual != expected:
+                raise ValueError(
+                    f"sha256 mismatch for {artifact_key}: "
+                    f"expected={expected}, actual={actual}"
+                )
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(data)
+
+    def _fetch_expected_sha256(self, artifact_key: str) -> Optional[str]:
+        import urllib.error
+
+        sha_url = self.output_root.artifact(f"{artifact_key}.sha256sum").public_url
+        try:
+            body = self._get(sha_url).decode("utf-8").strip()
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise
+        if not body:
+            return None
+        # Accept both a bare digest and ``sha256sum``-style "digest  filename".
+        return body.split()[0]
+
+    def upload_artifact(self, source_path: Path, artifact_key: str) -> None:
+        raise NotImplementedError(
+            "HTTPBackend is read-only; use the S3 transport (--transport s3) to upload"
+        )
+
+    def copy_artifact(
+        self, artifact_key: str, source_backend: "ArtifactBackend"
+    ) -> None:
+        raise NotImplementedError(
+            "HTTPBackend is read-only; use the S3 transport (--transport s3) to copy"
+        )
+
+    def artifact_exists(self, artifact_key: str) -> bool:
+        import urllib.error
+        import urllib.request
+
+        url = self.output_root.artifact(artifact_key).public_url
+        req = urllib.request.Request(url, method="HEAD")
+        try:
+            urllib.request.urlopen(req)
+            return True
+        except urllib.error.HTTPError:
+            return False
+        except Exception:
+            return False
+
+
+_HREF_RE = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+def _iter_index_hrefs(html: str):
+    """Yield href targets from a generated directory index page."""
+    for match in _HREF_RE.finditer(html):
+        yield match.group(1)
+
+
 def create_backend_from_env(
     run_id: Optional[str] = None,
     github_repository: Optional[str] = None,
     platform: Optional[str] = None,
+    transport: str = "auto",
 ) -> ArtifactBackend:
-    """Create the appropriate backend based on environment variables.
+    """Create an artifact backend for the given transport.
+
+    transport:
+    - "auto": local if THEROCK_LOCAL_STAGING_DIR is set, else S3.
+    - "local": LocalDirectoryBackend (requires THEROCK_LOCAL_STAGING_DIR).
+    - "s3": S3Backend (read/write, needs boto3 and credentials for writes).
+    - "http": HTTPBackend (read-only, credential-free, CDN-aware).
 
     Environment variables:
-    - THEROCK_LOCAL_STAGING_DIR: If set, use local backend
-    - THEROCK_RUN_ID: Override run ID (default: "local" or GITHUB_RUN_ID)
-    - THEROCK_PLATFORM: Override platform (default: current platform)
-
-    For S3 backend (when THEROCK_LOCAL_STAGING_DIR is not set):
-    - Uses WorkflowOutputRoot.from_workflow_run() for bucket selection
+    - THEROCK_LOCAL_STAGING_DIR: staging dir for the local backend.
+    - THEROCK_RUN_ID: override run ID (default: "local" or GITHUB_RUN_ID).
+    - THEROCK_PLATFORM: override platform (default: current platform).
     """
     import platform as platform_module
 
@@ -353,7 +479,14 @@ def create_backend_from_env(
     )
     run_id = run_id or os.getenv("THEROCK_RUN_ID", os.getenv("GITHUB_RUN_ID", "local"))
 
-    if local_staging:
+    if transport == "auto":
+        transport = "local" if local_staging else "s3"
+
+    if transport == "local":
+        if not local_staging:
+            raise ValueError(
+                "transport='local' requires THEROCK_LOCAL_STAGING_DIR to be set"
+            )
         output_root = WorkflowOutputRoot.for_local(
             run_id=run_id, platform=platform_name
         )
@@ -365,4 +498,8 @@ def create_backend_from_env(
     output_root = WorkflowOutputRoot.from_workflow_run(
         run_id=run_id, platform=platform_name, github_repository=github_repository
     )
-    return S3Backend(output_root=output_root)
+    if transport == "s3":
+        return S3Backend(output_root=output_root)
+    if transport == "http":
+        return HTTPBackend(output_root=output_root)
+    raise ValueError(f"Unknown transport: {transport!r}")

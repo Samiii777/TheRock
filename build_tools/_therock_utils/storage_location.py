@@ -49,6 +49,18 @@ class StorageLocation:
         """Public HTTPS URL for browser access."""
         return f"https://{self.bucket}.s3.amazonaws.com/{self.relative_path}"
 
+    @property
+    def public_url(self) -> str:
+        """CDN-aware public URL, resolved through the bucket registry.
+
+        Use for human-clicked links (e.g. job summaries). Machine-consumed URLs
+        should keep using ``.https_url`` so CI can read the backing bucket
+        directly and avoid CloudFront data-transfer charges.
+        """
+        from .s3_buckets import resolve_public_url
+
+        return resolve_public_url(self.bucket, self.relative_path)
+
     def local_path(self, staging_dir: Path) -> Path:
         """Local filesystem path for this location.
 

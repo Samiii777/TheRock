@@ -64,6 +64,7 @@ from _therock_utils.build_topology import BuildTopology
 from _therock_utils.artifact_backend import (
     ArtifactBackend,
     ARTIFACT_EXTENSIONS,
+    HTTPBackend,
     LocalDirectoryBackend,
     S3Backend,
     create_backend_from_env,
@@ -392,6 +393,7 @@ def do_fetch(args: argparse.Namespace):
         run_id=args.run_id,
         github_repository=args.run_github_repo,
         platform=args.platform,
+        transport=args.transport,
     )
     log(f"Using backend: {backend.base_uri}")
 
@@ -896,6 +898,7 @@ def _create_source_backend(
     source_run_id: str,
     source_repository: Optional[str],
     local_staging_dir: Optional[Path],
+    transport: str = "auto",
 ) -> ArtifactBackend:
     """Create a backend for the source run ID.
 
@@ -904,7 +907,15 @@ def _create_source_backend(
 
     For local backends, creates a LocalDirectoryBackend in the same staging dir.
     """
-    if local_staging_dir or os.getenv("THEROCK_LOCAL_STAGING_DIR"):
+    resolved = transport
+    if resolved == "auto":
+        resolved = (
+            "local"
+            if (local_staging_dir or os.getenv("THEROCK_LOCAL_STAGING_DIR"))
+            else "s3"
+        )
+
+    if resolved == "local":
         staging = local_staging_dir or Path(os.environ["THEROCK_LOCAL_STAGING_DIR"])
         output_root = WorkflowOutputRoot.for_local(
             run_id=source_run_id, platform=platform
@@ -920,7 +931,11 @@ def _create_source_backend(
         github_repository=source_repository,
         lookup_workflow_run=True,
     )
-    return S3Backend(output_root=output_root)
+    if resolved == "s3":
+        return S3Backend(output_root=output_root)
+    if resolved == "http":
+        return HTTPBackend(output_root=output_root)
+    raise ValueError(f"Unknown transport: {resolved!r}")
 
 
 def do_copy(args: argparse.Namespace):
@@ -959,10 +974,12 @@ def do_copy(args: argparse.Namespace):
         source_run_id=args.source_run_id,
         source_repository=args.source_repository,
         local_staging_dir=args.local_staging_dir,
+        transport=args.source_transport or args.transport,
     )
     dest_backend = create_backend_from_env(
         run_id=args.run_id,
         platform=args.platform,
+        transport=args.transport,
     )
 
     log(f"Source: {source_backend.base_uri}")
@@ -1153,6 +1170,20 @@ def _add_backend_args(parser: argparse.ArgumentParser):
         default=os.getenv("THEROCK_LOCAL_STAGING_DIR"),
         help="Local staging directory (sets THEROCK_LOCAL_STAGING_DIR)",
     )
+    parser.add_argument(
+        "--transport",
+        choices=["auto", "s3", "http", "local"],
+        default="auto",
+        help="Artifact transport (default: auto, i.e. local if a staging dir is "
+        "set else s3). 'http' is read-only and credential-free.",
+    )
+    parser.add_argument(
+        "--bucket-config-file",
+        type=str,
+        default=os.getenv("THEROCK_S3_BUCKETS_FILE"),
+        help="Path to a JSON bucket registry file to merge (default: "
+        "THEROCK_S3_BUCKETS_FILE env var)",
+    )
 
 
 def main(argv: Optional[List[str]] = None):
@@ -1310,6 +1341,12 @@ def main(argv: Optional[List[str]] = None):
         action="store_true",
         help="List what would be copied without actually copying",
     )
+    copy_parser.add_argument(
+        "--source-transport",
+        choices=["auto", "s3", "http", "local"],
+        default=None,
+        help="Transport for the copy source (default: same as --transport)",
+    )
     copy_parser.set_defaults(func=do_copy)
 
     # info command
@@ -1333,6 +1370,12 @@ def main(argv: Optional[List[str]] = None):
     list_parser.set_defaults(func=do_list_stages)
 
     args = parser.parse_args(argv)
+
+    bucket_config_file = getattr(args, "bucket_config_file", None)
+    if bucket_config_file:
+        from _therock_utils.s3_buckets import load_bucket_config_file
+
+        load_bucket_config_file(bucket_config_file)
 
     # Set environment variable if --local-staging-dir provided (only on fetch/push)
     local_staging_dir = getattr(args, "local_staging_dir", None)
