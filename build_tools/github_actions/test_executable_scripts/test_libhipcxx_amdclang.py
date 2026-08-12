@@ -131,6 +131,27 @@ else:
         "../ci/test_libhipcxx.sh",
     ]
 
+# gfx1151 (RDNA3.5 APU) does not support system-scope atomics; the atomics
+# .pass.cpp tests launch device kernels doing system-scope seq_cst atomics and
+# fault with hipErrorLaunchFailure, hanging the GPU and cascading into unrelated
+# failures. The long test paths below also exceed MAX_PATH on Windows. Filter
+# them out via lit's LIT_FILTER_OUT so the rest of the suite still runs.
+if is_windows and gpu_arch == "gfx1151":
+    lit_filter_out = "|".join(
+        [
+            r"atomics/atomics\.types\.operations/atomics\.types\.operations\.req/.*\.pass\.cpp",
+            r"indirectcallable/indirectinvocable/.*\.compile\.pass\.cpp",
+            r"iterator\.assoc\.types/readable\.traits/indirectly_readable_traits\.compile\.pass\.cpp",
+            r"iterator\.concepts/.*\.compile\.pass\.cpp",
+            r"uninitialized\.construct\.default/uninitialized_default_construct(_n)?\.pass\.cpp",
+        ]
+    )
+    existing = environ_vars.get("LIT_FILTER_OUT")
+    environ_vars["LIT_FILTER_OUT"] = (
+        f"({existing})|({lit_filter_out})" if existing else lit_filter_out
+    )
+    logging.info(f"LIT_FILTER_OUT: {environ_vars['LIT_FILTER_OUT']}")
+
 logging.info(f"++ Exec [{os.getcwd()}]$ {shlex.join(cmd)}")
 
 subprocess.run(cmd, check=True, env=environ_vars)
