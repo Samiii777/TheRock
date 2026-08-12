@@ -216,6 +216,13 @@ jobs:
             --index-url=${{ inputs.package_index_url }} \
             --activate-in-future-github-actions-steps
 
+      - name: Relax test requirement pins without a Python 3.14 wheel
+        run: |
+          req="external-builds/pytorch/pytorch/.ci/docker/requirements-ci.txt"
+          # pywavelets<1.9.0 ships no cp314 wheel, so pip builds 1.7.0 from source
+          # and fails ('M_PI' undeclared under -std=c17). See ROCm/TheRock#7185.
+          python -c "import re,pathlib; p=pathlib.Path('$req'); p.write_text(re.sub(r'(?m)^pywavelets==[0-9.]+', 'pywavelets>=1.9.0', p.read_text()))"
+
       - name: Install test requirements
         run: |
           python -m pip install -r external-builds/pytorch/requirements-test.txt
