@@ -9,6 +9,64 @@
 
 skip_tests = {
     "common": {
+        # Version skew: the pinned test_autograd.py leads the 2.13 wheel's
+        # compiled core, exercising autograd behavior the wheel lacks. See
+        # https://github.com/ROCm/TheRock/issues/26417
+        "autograd": [
+            # dict inputs to grad()/backward(): "all inputs have to be
+            # Tensors or GradientEdges, but got str".
+            "test_backward_dict_inputs",
+            "test_backward_dict_inputs_tensor_backward",
+            "test_grad_dict_inputs",
+            "test_grad_dict_inputs_allow_unused",
+            "test_grad_dict_inputs_batched_grads",
+            "test_grad_dict_inputs_create_graph",
+            "test_grad_dict_inputs_materialize_grads",
+            "test_grad_dict_inputs_non_string_keys",
+            "test_grad_dict_inputs_ordered_dict",
+            # Function.apply kwargs: "apply() takes no keyword arguments".
+            "test_custom_function_apply_kwargs",
+            "test_custom_function_apply_kwargs_errors",
+            "test_custom_function_apply_kwargs_required",
+            "test_custom_function_apply_kwargs_setup_context",
+            "test_custom_function_apply_kwargs_tensor",
+            # empty-input validation ordering: ValueError vs expected RuntimeError.
+            "test_grad_empty_inputs",
+            "test_grad_dict_inputs_empty",
+            # torch.autograd.enforce_grad_layout_policy semantics differ from wheel.
+            "test_enforce_grad_layout_policy",
+        ],
+        "autograd": [
+            # test/test_autograd.py from the pinned PyTorch checkout is newer
+            # than the compiled core in the 2.13 wheel, so these exercise
+            # autograd features/behavior that the wheel does not yet implement
+            # (version skew, not a ROCm defect). Tracked in
+            # https://github.com/ROCm/TheRock/issues/26417
+            #
+            # grad()/backward() with dict inputs - the wheel's compiled core
+            # rejects non-Tensor inputs: "all inputs have to be Tensors or
+            # GradientEdges, but got str".
+            "test_backward_dict_inputs",
+            "test_backward_dict_inputs_tensor_backward",
+            "test_grad_dict_inputs",
+            "test_grad_dict_inputs_allow_unused",
+            "test_grad_dict_inputs_batched_grads",
+            "test_grad_dict_inputs_create_graph",
+            "test_grad_dict_inputs_empty",
+            "test_grad_dict_inputs_materialize_grads",
+            "test_grad_dict_inputs_non_string_keys",
+            "test_grad_dict_inputs_ordered_dict",
+            # autograd.Function.apply keyword arguments - the wheel's native
+            # apply() raises "apply() takes no keyword arguments".
+            "test_custom_function_apply_kwargs",
+            "test_custom_function_apply_kwargs_errors",
+            "test_custom_function_apply_kwargs_required",
+            "test_custom_function_apply_kwargs_setup_context",
+            "test_custom_function_apply_kwargs_tensor",
+            # empty-inputs validation ordering differs: the wheel raises
+            # ValueError where the test expects RuntimeError.
+            "test_grad_empty_inputs",
+        ],
         "cuda": [
             # TestCuda - conflicts with how our test script and runners are
             # configured.
