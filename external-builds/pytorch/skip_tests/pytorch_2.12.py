@@ -356,6 +356,19 @@ skip_tests = {
             "test_unused_forward_module",
             # TestViewOpsWithLocalTensor - list index out of range
             "test_view_ops",
+            # TestSACILP - sac_milp infeasible (peak_mem == -1): RuntimeEstimator
+            # derives the roofline from the live GPU's peak FLOPS/DRAM bandwidth,
+            # so the hardcoded memory budget is calibrated for the reference GPU
+            # and is infeasible on gfx1151. Upstream pins the estimator device
+            # (RuntimeEstimator(gpu_type=...)) and marks the test @pytest.mark.multigpu.
+            "test_sac_ilp_case1",
+            # TestFlattenParams - Scalars are not close (rel diff ~1.6e-4 > rtol
+            # 1.3e-6): FSDP flattens shared params, changing the p-norm reduction
+            # order vs the reference module; fp accumulation differs on gfx1151.
+            "test_pnorm_after_step_with_shared_params",
+            # WorkerServerTest - hardcoded TCP port 1234 collides (EADDRINUSE)
+            # under the concurrent 2-shard distributed run.
+            "test_tcp",
         ],
     },
 }
