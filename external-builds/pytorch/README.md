@@ -288,6 +288,30 @@ For example:
 PYTORCH_TEST_WITH_ROCM=1 python pytorch/test/run_test.py --include test_torch
 ```
 
+### Running torchaudio tests
+
+The full torchaudio suite runs thousands of tests in a single interpreter whose
+RSS grows across tests. On memory-constrained targets (e.g. gfx1150 APUs with a
+small carve-out and little swap, inside a docker/cgroup limit) that interpreter
+can be OOM-killed (exit 137) before `report.json` is written.
+
+[`run_torchaudio_tests.py`](run_torchaudio_tests.py) runs the torchaudio test
+tree in memory-bounded shards, each in a fresh pytest subprocess, so peak RSS
+resets per shard and cannot accumulate to the cgroup limit. It also caps
+OMP/BLAS threads and always writes `report.json` (recording any OOM-killed shard
+as incomplete). Requires `pytest-json-report` (and `pytest-forked` for
+`--per-test`); both are in [`requirements-test.txt`](requirements-test.txt).
+
+```bash
+# Default: 16 shards, thread cap 8
+python run_torchaudio_tests.py --test-dir /path/to/audio/test
+
+# Strongest RSS bound: isolate every test in its own subprocess
+python run_torchaudio_tests.py --test-dir /path/to/audio/test --per-test
+
+python run_torchaudio_tests.py --shards 32 --max-threads 4
+```
+
 ## Nightly releases
 
 ### Gating releases with Pytorch tests
