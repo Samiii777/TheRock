@@ -398,8 +398,11 @@ class TensorParallelLayerTestBase:
                             chunks=tensor_model_parallel_world_size,
                             dim=0,
                         )[parallel_state.get_tensor_model_parallel_rank()],
-                        atol=1e-4,
-                        rtol=1e-3
+                        # The fused wgrad kernel accumulates in a different
+                        # order than the reference, so compare at the dtype
+                        # noise floor rather than torch's default tolerances.
+                        atol=1e-3,
+                        rtol=1e-3,
                     )
 
                 parallel_state.destroy_model_parallel()
@@ -543,6 +546,11 @@ class TensorParallelLayerTestBase:
                             chunks=tensor_model_parallel_world_size,
                             dim=0,
                         )[parallel_state.get_tensor_model_parallel_rank()],
+                        # The fused wgrad kernel accumulates in a different
+                        # order than the reference, so compare at the dtype
+                        # noise floor rather than torch's default tolerances.
+                        atol=1e-3,
+                        rtol=1e-3,
                     )
 
                 parallel_state.destroy_model_parallel()

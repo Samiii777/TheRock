@@ -369,8 +369,9 @@ hipblasStatus_t gemm_bias( hipblasOperation_t transa, hipblasOperation_t transb,
                            const TensorType *A, const TensorType *B, TensorType *C)
 {
   hipblasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  int64_t lda = n;
-  int64_t ldb = k;
+  // C(m x n) = op(A)(m x k) . op(B)(k x n), column major
+  int64_t lda = transa == HIPBLAS_OP_T ? k : m;
+  int64_t ldb = transb == HIPBLAS_OP_T ? n : k;
   int64_t ldc = m;
 
 #if DEBUG
@@ -404,10 +405,14 @@ at::Tensor linear_bias_forward(at::Tensor input, at::Tensor weight, at::Tensor b
   if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
     CHECK_HIPBLASLT_ERROR(gemm_lt(HIPBLAS_OP_T, HIPBLAS_OP_N, &alpha, &beta, weight, input, output, bias, dummy_gelu, true, false, false));
   } else {
+    // Seed C with the broadcast bias and accumulate onto it with beta=1 so the
+    // bias is added in the fp32 compute type instead of the output dtype.
+    const float beta_bias = 1.0;
+    output.copy_(bias.expand({batch_size, out_features}));
     DISPATCH_TYPES(input.scalar_type(), "linear_bias_forward", [&] {
     auto result = gemm_bias<compute_t, scalar_t, datatype_t>(
                             HIPBLAS_OP_T, HIPBLAS_OP_N, out_features, batch_size, in_features,
-                            &alpha, &beta, weight.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>());
+                            &alpha, &beta_bias, weight.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>());
     if (result != 0) { fprintf(stderr, "INVALID RESULT for linear_bias_forward\n"); }
     });
   }
@@ -470,6 +475,8 @@ std::vector<at::Tensor> linear_bias_backward(at::Tensor input, at::Tensor weight
                             &alpha, &beta, weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), grad_input.data_ptr<scalar_t>());
     if (result != 0) { fprintf(stderr, "INVALID RESULT for linear_bias_forward\n"); }
     });
+
+    grad_bias = output.sum(0, false);
   }
   return {grad_input, grad_weight, grad_bias};
 }
@@ -528,7 +535,9 @@ std::vector<at::Tensor> linear_gelu_linear_forward(at::Tensor input,   at::Tenso
     CHECK_HIPBLASLT_ERROR(gemm_lt(HIPBLAS_OP_T, HIPBLAS_OP_N, &alpha, &beta, weight, input, output, bias, gelu, true, false, true));
     CHECK_HIPBLASLT_ERROR(gemm_lt(HIPBLAS_OP_T, HIPBLAS_OP_N, &alpha, &beta, weight2, output, output2, bias2, dummy_gelu, true, false, false));
   } else {
-    std::cout << "linear_gelu_linear_forward not implimented for non-MI300 GPU" << std::endl;
+    gelu    = at::addmm(bias, input, weight.t());
+    output  = at::gelu(gelu);
+    output2 = at::addmm(bias2, output, weight2.t());
   }
   return {output, output2, gelu};
 }
@@ -588,7 +597,12 @@ std::vector<at::Tensor> linear_gelu_linear_backward(at::Tensor input, at::Tensor
     CHECK_HIPBLASLT_ERROR(gemm_lt(HIPBLAS_OP_N, HIPBLAS_OP_T, &alpha, &beta, output, input, grad_weight, grad_bias2, dummy_gelu, true, false, false));
     grad_bias = output.sum(0, false);   // ToDo: Check why HipBLASLt fail to get bgrad above so this step is not needed.
   } else {
-    std::cout << "linear_gelu_linear_backward not implimented for non-MI300 GPU" << std::endl;
+    grad_bias2   = output2.sum(0, false);
+    grad_weight2 = output2.t().mm(output);
+    grad_output  = at::gelu_backward(output2.mm(weight2), gelu);
+    grad_bias    = grad_output.sum(0, false);
+    grad_weight  = grad_output.t().mm(input);
+    grad_input   = grad_output.mm(weight);
   }
   return {grad_input, grad_weight, grad_bias, grad_weight2, grad_bias2};
 }
