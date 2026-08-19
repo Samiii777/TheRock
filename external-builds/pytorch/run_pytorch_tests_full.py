@@ -64,6 +64,7 @@ from skip_tests.create_skip_tests import get_tests
 from pytorch_utils import (
     check_pytorch_source_version,
     configure_gpu_visibility,
+    enable_aotriton_experimental_archs,
     detect_pytorch_version,
     reconcile_agent_visibility_env,
 )
@@ -533,6 +534,7 @@ def main(argv: list[str]) -> int:
     selected_archs = configure_gpu_visibility(
         args.amdgpu_family, args.device_query, args.gpu_policy
     )
+    enable_aotriton_experimental_archs(selected_archs)
 
     pytorch_version = args.pytorch_version
     if not pytorch_version:

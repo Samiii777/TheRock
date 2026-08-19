@@ -384,6 +384,64 @@ def configure_gpu_visibility(
     return selected_archs
 
 
+AOTRITON_EXPERIMENTAL_ARCHS = frozenset(
+    {
+        # AOTriton 0.11.x isArchExperimentallySupported (v2src/util.cc).
+        "gfx950",
+        "gfx1151",
+        "gfx1201",
+        # Added by AOTriton main isArchExperimentallySupported (v3src/util.cc).
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1152",
+        "gfx1153",
+        "gfx1200",
+    }
+)
+
+
+def enable_aotriton_experimental_archs(selected_archs: list[str]) -> bool:
+    """Opt in to AOTriton attention kernels on experimentally supported archs.
+
+    PyTorch gates flash and mem-efficient attention behind
+    TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL for every arch that AOTriton reports
+    via isArchExperimentallySupported(). Without the opt-in those backends are
+    rejected, so sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]) has nothing left
+    to dispatch and raises "No available kernel. Aborting execution." even
+    though the wheel ships the matching AOTriton kernel images.
+
+    Must run BEFORE torch is imported: PyTorch caches the environment lookup in
+    a function-local static, so setting it later is a silent no-op.
+
+    Args:
+        selected_archs: Architectures made visible by configure_gpu_visibility.
+
+    Returns:
+        True if any visible arch is experimentally supported.
+    """
+    var = "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"
+
+    # Runtime arch names may carry feature suffixes, e.g. "gfx942:sramecc+:xnack-".
+    experimental = sorted(
+        {
+            arch
+            for arch in selected_archs
+            if arch.split(":")[0] in AOTRITON_EXPERIMENTAL_ARCHS
+        }
+    )
+    if not experimental:
+        return False
+
+    os.environ.setdefault(var, "1")
+    print(
+        f"AOTriton experimental arch(es) detected ({', '.join(experimental)}): "
+        f"{var}={os.environ[var]}"
+    )
+    return True
+
+
 def detect_pytorch_version() -> str:
     """Auto-detect the PyTorch version from the installed package.
 
