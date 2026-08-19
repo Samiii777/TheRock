@@ -37,6 +37,16 @@ class TensorParallelLayerTestBase:
     def tensor_shape(self) -> typing.Sequence[int]:
         return [self.SEQUENCE_LENGTH, self.BATCH_SIZE, self.HIDDEN_SIZE]
 
+    # ``gradient_accumulation_fusion`` accumulates into an fp32 ``main_grad``
+    # while the reference accumulates in the parameter dtype, so the two differ
+    # by the rounding noise of a ``SEQUENCE_LENGTH * BATCH_SIZE`` term reduction
+    # -- in fp16 that noise is around one ULP, well above the default
+    # tolerances. Against a float64 oracle the fused gradient is the more
+    # accurate of the two, so this bounds the reference's error, not the
+    # kernel's.
+    WEIGHT_GRAD_FUSION_ATOL: float = 1e-3
+    WEIGHT_GRAD_FUSION_RTOL: float = 1e-2
+
     @torch.no_grad()
     @unittest.skipIf(torch.cuda.device_count() < 2, "Requires >=2 GPUs")
     def test_all_gather_parity(self) -> None:
@@ -398,8 +408,12 @@ class TensorParallelLayerTestBase:
                             chunks=tensor_model_parallel_world_size,
                             dim=0,
                         )[parallel_state.get_tensor_model_parallel_rank()],
-                        atol=1e-4,
-                        rtol=1e-3
+                        atol=self.WEIGHT_GRAD_FUSION_ATOL
+                        if gradient_accumulation_fusion
+                        else 1e-4,
+                        rtol=self.WEIGHT_GRAD_FUSION_RTOL
+                        if gradient_accumulation_fusion
+                        else 1e-3,
                     )
 
                 parallel_state.destroy_model_parallel()
@@ -543,6 +557,12 @@ class TensorParallelLayerTestBase:
                             chunks=tensor_model_parallel_world_size,
                             dim=0,
                         )[parallel_state.get_tensor_model_parallel_rank()],
+                        atol=self.WEIGHT_GRAD_FUSION_ATOL
+                        if gradient_accumulation_fusion
+                        else None,
+                        rtol=self.WEIGHT_GRAD_FUSION_RTOL
+                        if gradient_accumulation_fusion
+                        else None,
                     )
 
                 parallel_state.destroy_model_parallel()
