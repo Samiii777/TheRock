@@ -717,6 +717,15 @@ def _setup_common_build_env(
         env["BLAS"] = "OpenBLAS"
         env["OpenBLAS_HOME"] = str(host_math_path)
         env["OpenBLAS_LIB_NAME"] = "rocm-openblas"
+        # rocm-openblas returns complex<float> from cdotc_/cdotu_ in a register
+        # but uses a hidden result pointer for the 16-byte complex<double>
+        # zdotc_/zdotu_. PyTorch's BLAS_ABI.cmake only probes the real sdot_, so
+        # it cannot detect this and falls back to the raw Fortran declarations,
+        # which pass the result pointer where cdotc_ expects `n`. The complex64
+        # result is then never written and the bogus length can read out of
+        # bounds. The cblas_*_sub forms take an explicit output pointer and have
+        # no return value, so both precisions agree.
+        env["PYTORCH_BLAS_USE_CBLAS_DOT"] = "ON"
 
     return env
 
