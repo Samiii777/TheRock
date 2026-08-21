@@ -533,6 +533,16 @@ def _setup_common_build_env(
         env["BLAS"] = "OpenBLAS"
         env["OpenBLAS_HOME"] = str(host_math_path)
         env["OpenBLAS_LIB_NAME"] = "rocm-openblas"
+        # rocm-openblas returns single precision complex dots (cdotc_/cdotu_)
+        # by value but double precision ones via a hidden result pointer, so the
+        # Fortran bindings cannot be correct for both. Bind the cblas_*_sub entry
+        # points instead, which take an explicit output pointer. The cache entry
+        # also pre-empts BLAS_ABI.cmake's cblas_sdot try-run, which on Windows
+        # fails whenever the loader cannot resolve rocm-openblas.dll.
+        env["PYTORCH_BLAS_USE_CBLAS_DOT"] = "ON"
+        env["CMAKE_ARGS"] = (
+            os.environ.get("CMAKE_ARGS", "") + " -DBLAS_USE_CBLAS_DOT=TRUE"
+        ).strip()
 
     return env
 
