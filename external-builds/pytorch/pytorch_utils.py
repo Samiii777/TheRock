@@ -17,6 +17,10 @@ from pathlib import Path
 from importlib.metadata import version as get_package_version
 from packaging.version import Version
 
+# Archs that aotriton::isArchExperimentallySupported reports as experimentally
+# supported (see aotriton v2src/util.cc).
+AOTRITON_EXPERIMENTAL_ARCHS = frozenset({"gfx950", "gfx1151", "gfx1201"})
+
 
 def reconcile_agent_visibility_env() -> None:
     """Drop GPU_DEVICE_ORDINAL to avoid a fatal HIP agent-visibility conflict.
@@ -382,6 +386,40 @@ def configure_gpu_visibility(
         f"device(s)={', '.join(device_ids)}"
     )
     return selected_archs
+
+
+def enable_aotriton_experimental_archs(selected_archs: list[str]) -> None:
+    """Opt in to AOTriton attention kernels on experimentally supported archs.
+
+    AOTriton classifies the archs in ``AOTRITON_EXPERIMENTAL_ARCHS`` as
+    experimentally supported. For those, PyTorch's flash and memory-efficient
+    hardware-support checks return false unless
+    TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL is set, so any test restricting SDPA
+    to those backends fails with "No available kernel. Aborting execution."
+    even though the wheel ships working kernel images for the arch.
+
+    Must run BEFORE torch is imported: PyTorch caches the environment lookup in
+    a function-local static on the first backend query.
+
+    Args:
+        selected_archs: The architectures made visible for this test run.
+    """
+    experimental_archs = sorted(
+        {
+            arch
+            for arch in (arch.split(":")[0] for arch in selected_archs)
+            if arch in AOTRITON_EXPERIMENTAL_ARCHS
+        }
+    )
+    if not experimental_archs:
+        return
+
+    # setdefault so an explicit opt-out from the caller is preserved.
+    previous = os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    print(
+        f"AOTriton experimental arch(es) selected: {', '.join(experimental_archs)}; "
+        f"TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL={previous}"
+    )
 
 
 def detect_pytorch_version() -> str:
