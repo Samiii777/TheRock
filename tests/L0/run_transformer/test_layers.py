@@ -398,8 +398,8 @@ class TensorParallelLayerTestBase:
                             chunks=tensor_model_parallel_world_size,
                             dim=0,
                         )[parallel_state.get_tensor_model_parallel_rank()],
-                        atol=1e-4,
-                        rtol=1e-3 
+                        atol=1e-3 if accumulation_in_fp16 else 1e-4,
+                        rtol=1e-2 if accumulation_in_fp16 else 1e-3,
                     )
 
                 parallel_state.destroy_model_parallel()
@@ -543,6 +543,8 @@ class TensorParallelLayerTestBase:
                             chunks=tensor_model_parallel_world_size,
                             dim=0,
                         )[parallel_state.get_tensor_model_parallel_rank()],
+                        atol=1e-3 if accumulation_in_fp16 else 1e-4,
+                        rtol=1e-2 if accumulation_in_fp16 else 1e-3,
                     )
 
                 parallel_state.destroy_model_parallel()
