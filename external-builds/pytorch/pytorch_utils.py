@@ -17,6 +17,11 @@ from pathlib import Path
 from importlib.metadata import version as get_package_version
 from packaging.version import Version
 
+# Architectures AOTriton reports through isArchExperimentallySupported(), which
+# PyTorch keeps behind TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL.
+# Keep in sync with isArchExperimentallySupported in aotriton's v2src/util.cc.
+AOTRITON_EXPERIMENTAL_ARCHS = frozenset({"gfx950", "gfx1151", "gfx1201"})
+
 
 def reconcile_agent_visibility_env() -> None:
     """Drop GPU_DEVICE_ORDINAL to avoid a fatal HIP agent-visibility conflict.
@@ -382,6 +387,39 @@ def configure_gpu_visibility(
         f"device(s)={', '.join(device_ids)}"
     )
     return selected_archs
+
+
+def enable_aotriton_experimental_archs(selected_archs: list[str]) -> None:
+    """Opts in to AOTriton attention kernels on experimentally supported archs.
+
+    PyTorch gates flash and memory-efficient attention behind
+    TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL for architectures AOTriton reports
+    through isArchExperimentallySupported. Without the opt-in those backends
+    report no hardware support, so restricting SDPA to EFFICIENT_ATTENTION
+    fails with "No available kernel. Aborting execution." even though the wheel
+    ships kernel images for the arch.
+
+    Must run before torch is imported: PyTorch caches the variable in a
+    function-local static on first use.
+
+    Args:
+        selected_archs: Architectures made visible by configure_gpu_visibility.
+    """
+    experimental = sorted(
+        arch
+        for arch in selected_archs
+        if arch.split(":")[0] in AOTRITON_EXPERIMENTAL_ARCHS
+    )
+    if not experimental:
+        return
+
+    os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    value = os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"]
+    print(
+        f"AOTriton experimentally supported arch(es) visible: "
+        f"{', '.join(experimental)}; "
+        f"TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL={value}"
+    )
 
 
 def detect_pytorch_version() -> str:

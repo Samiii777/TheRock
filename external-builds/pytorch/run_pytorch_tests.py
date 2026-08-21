@@ -84,6 +84,7 @@ from pytorch_utils import (
     check_pytorch_source_version,
     configure_gpu_visibility,
     detect_pytorch_version,
+    enable_aotriton_experimental_archs,
     reconcile_agent_visibility_env,
 )
 
@@ -266,6 +267,7 @@ def main() -> int:
         selected_archs = configure_gpu_visibility(
             args.amdgpu_family, args.device_query, args.gpu_policy
         )
+        enable_aotriton_experimental_archs(selected_archs)
 
         # Determine PyTorch version
         pytorch_version = args.pytorch_version
