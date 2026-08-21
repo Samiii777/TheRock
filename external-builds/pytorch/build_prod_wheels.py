@@ -718,6 +718,17 @@ def _setup_common_build_env(
         env["OpenBLAS_HOME"] = str(host_math_path)
         env["OpenBLAS_LIB_NAME"] = "rocm-openblas"
 
+        # rocm-openblas returns single-complex dots by value but double-complex
+        # dots through a hidden result pointer, so no BLAS_F2C setting is correct
+        # for both. Pin ATen to the unambiguous cblas_?dot?_sub entry points.
+        blas_abi_args = "-DBLAS_USE_CBLAS_DOT=ON -DBLAS_F2C=OFF"
+        existing_cmake_args = env.get("CMAKE_ARGS")
+        env["CMAKE_ARGS"] = (
+            f"{existing_cmake_args} {blas_abi_args}"
+            if existing_cmake_args
+            else blas_abi_args
+        )
+
     return env
 
 
