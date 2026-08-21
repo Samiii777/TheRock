@@ -369,8 +369,8 @@ hipblasStatus_t gemm_bias( hipblasOperation_t transa, hipblasOperation_t transb,
                            const TensorType *A, const TensorType *B, TensorType *C)
 {
   hipblasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  int64_t lda = n;
-  int64_t ldb = k;
+  int64_t lda = transa == HIPBLAS_OP_T ? k : m;
+  int64_t ldb = transb == HIPBLAS_OP_T ? n : k;
   int64_t ldc = m;
 
 #if DEBUG
@@ -404,10 +404,14 @@ at::Tensor linear_bias_forward(at::Tensor input, at::Tensor weight, at::Tensor b
   if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
     CHECK_HIPBLASLT_ERROR(gemm_lt(HIPBLAS_OP_T, HIPBLAS_OP_N, &alpha, &beta, weight, input, output, bias, dummy_gelu, true, false, false));
   } else {
+    // Seed C with the broadcast bias and accumulate onto it with beta=1 so the
+    // bias is added in the fp32 compute type instead of in scalar_t.
+    output.copy_(bias.expand({batch_size, out_features}));
+    const float beta_one = 1.0;
     DISPATCH_TYPES(input.scalar_type(), "linear_bias_forward", [&] {
     auto result = gemm_bias<compute_t, scalar_t, datatype_t>(
                             HIPBLAS_OP_T, HIPBLAS_OP_N, out_features, batch_size, in_features,
-                            &alpha, &beta, weight.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>());
+                            &alpha, &beta_one, weight.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>());
     if (result != 0) { fprintf(stderr, "INVALID RESULT for linear_bias_forward\n"); }
     });
   }
@@ -457,19 +461,21 @@ std::vector<at::Tensor> linear_bias_backward(at::Tensor input, at::Tensor weight
   // **********************************************************************************
     grad_bias = output.sum(0, false);
   } else {
-    DISPATCH_TYPES(input.scalar_type(), "linear_bias_forward", [&] {
+    DISPATCH_TYPES(input.scalar_type(), "linear_bias_backward", [&] {
     auto result = gemm_bias<compute_t, scalar_t, datatype_t>(
                             HIPBLAS_OP_N, HIPBLAS_OP_T, in_features, out_features, batch_size,
                             &alpha, &beta, input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), grad_weight.data_ptr<scalar_t>());
-    if (result != 0) { fprintf(stderr, "INVALID RESULT for linear_bias_forward\n"); }
+    if (result != 0) { fprintf(stderr, "INVALID RESULT for linear_bias_backward\n"); }
     });
 
-    DISPATCH_TYPES(input.scalar_type(), "linear_bias_forward", [&] {
+    DISPATCH_TYPES(input.scalar_type(), "linear_bias_backward", [&] {
     auto result = gemm_bias<compute_t, scalar_t, datatype_t>(
                             HIPBLAS_OP_N, HIPBLAS_OP_N, in_features, batch_size, out_features,
                             &alpha, &beta, weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), grad_input.data_ptr<scalar_t>());
-    if (result != 0) { fprintf(stderr, "INVALID RESULT for linear_bias_forward\n"); }
+    if (result != 0) { fprintf(stderr, "INVALID RESULT for linear_bias_backward\n"); }
     });
+
+    grad_bias = output.sum(0, false);
   }
   return {grad_input, grad_weight, grad_bias};
 }
@@ -528,7 +534,11 @@ std::vector<at::Tensor> linear_gelu_linear_forward(at::Tensor input,   at::Tenso
     CHECK_HIPBLASLT_ERROR(gemm_lt(HIPBLAS_OP_T, HIPBLAS_OP_N, &alpha, &beta, weight, input, output, bias, gelu, true, false, true));
     CHECK_HIPBLASLT_ERROR(gemm_lt(HIPBLAS_OP_T, HIPBLAS_OP_N, &alpha, &beta, weight2, output, output2, bias2, dummy_gelu, true, false, false));
   } else {
-    std::cout << "linear_gelu_linear_forward not implimented for non-MI300 GPU" << std::endl;
+    // gelu holds the first GEMM's pre-activation and output its post-activation,
+    // matching the HIPBLASLT_EPILOGUE_GELU_AUX contract used above.
+    gelu.copy_(at::addmm(bias, input, weight.t()));
+    output.copy_(at::gelu(gelu));
+    output2.copy_(at::addmm(bias2, output, weight2.t()));
   }
   return {output, output2, gelu};
 }
@@ -588,7 +598,15 @@ std::vector<at::Tensor> linear_gelu_linear_backward(at::Tensor input, at::Tensor
     CHECK_HIPBLASLT_ERROR(gemm_lt(HIPBLAS_OP_N, HIPBLAS_OP_T, &alpha, &beta, output, input, grad_weight, grad_bias2, dummy_gelu, true, false, false));
     grad_bias = output.sum(0, false);   // ToDo: Check why HipBLASLt fail to get bgrad above so this step is not needed.
   } else {
-    std::cout << "linear_gelu_linear_backward not implimented for non-MI300 GPU" << std::endl;
+    // output2 carries the incoming gradient, gelu the first GEMM's
+    // pre-activation and output its post-activation.
+    grad_weight2.copy_(at::mm(output2.t(), output));
+    grad_bias2 = output2.sum(0, false);
+
+    auto grad_gelu = at::gelu_backward(at::mm(output2, weight2), gelu);
+    grad_weight.copy_(at::mm(grad_gelu.t(), input));
+    grad_bias = grad_gelu.sum(0, false);
+    grad_input.copy_(at::mm(grad_gelu, weight));
   }
   return {grad_input, grad_weight, grad_bias, grad_weight2, grad_bias2};
 }

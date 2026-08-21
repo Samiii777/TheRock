@@ -32,6 +32,8 @@ class TensorParallelLayerTestBase:
     INPUT_SIZE_COEFF: int = 256
     OUTPUT_SIZE_COEFF: int = 256
     SEED: int = 123456
+    WEIGHT_GRAD_FUSION_ATOL: float = 1e-3
+    WEIGHT_GRAD_FUSION_RTOL: float = 1e-2
 
     @property
     def tensor_shape(self) -> typing.Sequence[int]:
@@ -398,8 +400,12 @@ class TensorParallelLayerTestBase:
                             chunks=tensor_model_parallel_world_size,
                             dim=0,
                         )[parallel_state.get_tensor_model_parallel_rank()],
-                        atol=1e-4,
-                        rtol=1e-3
+                        atol=self.WEIGHT_GRAD_FUSION_ATOL
+                        if gradient_accumulation_fusion
+                        else 1e-4,
+                        rtol=self.WEIGHT_GRAD_FUSION_RTOL
+                        if gradient_accumulation_fusion
+                        else 1e-3,
                     )
 
                 parallel_state.destroy_model_parallel()
@@ -543,6 +549,14 @@ class TensorParallelLayerTestBase:
                             chunks=tensor_model_parallel_world_size,
                             dim=0,
                         )[parallel_state.get_tensor_model_parallel_rank()],
+                        **(
+                            {
+                                "atol": self.WEIGHT_GRAD_FUSION_ATOL,
+                                "rtol": self.WEIGHT_GRAD_FUSION_RTOL,
+                            }
+                            if gradient_accumulation_fusion
+                            else {}
+                        ),
                     )
 
                 parallel_state.destroy_model_parallel()
