@@ -9,6 +9,12 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 
 from itertools import product
 
+import importlib.util
+import unittest
+
+# torch's default ONNX exporter is dynamo-based and additionally imports onnxscript.
+_HAS_ONNX = all(importlib.util.find_spec(m) is not None for m in ("onnx", "onnxscript"))
+
 def _prep_inputs(batch_size, normalized_shape, dtype):
     shape = (batch_size, *normalized_shape)
     fused = torch.randn(shape).cuda().requires_grad_(True)
@@ -292,6 +298,7 @@ class TestFusedLayerNorm(common_utils.TestCase):
         assert 'x_in' in onnx_str
         assert 'ReduceMean' in onnx_str or 'LayerNormalization' in onnx_str
 
+    @unittest.skipUnless(_HAS_ONNX, "onnx and onnxscript are required to export")
     def test_rms_export(self):
         batch_size = 16
         normalized_shape = [32, 16]
@@ -305,6 +312,7 @@ class TestFusedLayerNorm(common_utils.TestCase):
         self._verify_export(fused, fused_x)
         self._verify_export(fused_m, fused_x)
         
+    @unittest.skipUnless(_HAS_ONNX, "onnx and onnxscript are required to export")
     def test_layer_norm_export(self):
         batch_size = 16
         normalized_shape = [32, 16]
