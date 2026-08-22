@@ -114,7 +114,9 @@ if TORCH_MAJOR == 0 and TORCH_MINOR < 4:
     )
 
 # cmdclass = {}
-extras = {}
+# tests/L0/run_fused_layer_norm exports through torch.onnx; the dynamo exporter
+# torch selects by default also imports onnxscript.
+extras = {"onnx": ["onnx>=1.16", "onnxscript"]}
 
 if not IS_ROCM_PYTORCH:
     _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
