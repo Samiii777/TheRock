@@ -151,6 +151,7 @@ import os
 from pathlib import Path
 from packaging.version import parse
 import platform
+import re
 import shutil
 import shlex
 import subprocess
@@ -166,6 +167,20 @@ is_windows = platform.system() == "Windows"
 
 # LLVM download URL for triton-windows
 LLVM_BASE_URL = "https://oaitriton.blob.core.windows.net/public/llvm-builds"
+
+# Architectures aotriton::isArchExperimentallySupported() reports as only
+# experimentally supported. Keep in sync with aotriton (v2python/gpu_targets.py).
+AOTRITON_EXPERIMENTAL_ARCHES = (
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1250",
+)
 
 # List of library preloads for Linux to generate into _rocm_init.py.
 # These are loaded with RTLD_GLOBAL on `import torch` via _rocm_init.py so
@@ -417,14 +432,24 @@ def get_rocm_path(path_name: str) -> Path:
     )
 
 
-def get_rocm_init_contents(args: argparse.Namespace):
+def get_rocm_init_contents(args: argparse.Namespace, pytorch_rocm_arch: str = ""):
     """Gets the contents of the _rocm_init.py file to add to the build."""
     sdk_version = get_rocm_sdk_version()
     library_preloads = (
         WINDOWS_LIBRARY_PRELOADS if is_windows else LINUX_LIBRARY_PRELOADS
     )
     library_preloads_formatted = ", ".join(f"'{s}'" for s in library_preloads)
-    return textwrap.dedent(
+    # aotriton reports some architectures as only experimentally supported, and
+    # sdp_utils.cpp then refuses flash/mem-efficient attention unless this is
+    # opted into. SDPA restricted to SDPBackend.EFFICIENT_ATTENTION has no math
+    # fallback, so it aborts with "No available kernel" rather than using the
+    # image we ship. Only opt in when every target of this wheel needs it, so
+    # wheels covering other architectures keep the upstream default.
+    targets = [t for t in re.split(r"[;,\s]+", pytorch_rocm_arch) if t]
+    enable_aotriton_experimental = bool(targets) and all(
+        t.split(":")[0] in AOTRITON_EXPERIMENTAL_ARCHES for t in targets
+    )
+    contents = textwrap.dedent(
         f"""
         def initialize():
             import rocm_sdk
@@ -433,6 +458,13 @@ def get_rocm_init_contents(args: argparse.Namespace):
                 check_version='{sdk_version}')
         """
     )
+    if enable_aotriton_experimental:
+        contents += (
+            "    import os\n"
+            "    os.environ.setdefault"
+            "('TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL', '1')\n"
+        )
+    return contents
 
 
 def remove_dir_if_exists(dir: Path):
@@ -1117,7 +1149,9 @@ def do_build_pytorch(
     )
 
     # Add the _rocm_init.py file.
-    (pytorch_dir / "torch" / "_rocm_init.py").write_text(get_rocm_init_contents(args))
+    (pytorch_dir / "torch" / "_rocm_init.py").write_text(
+        get_rocm_init_contents(args, env.get("PYTORCH_ROCM_ARCH", ""))
+    )
 
     # Enable/disable flash attention.
     if args.enable_pytorch_flash_attention is not None:
