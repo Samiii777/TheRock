@@ -65,6 +65,7 @@ from pytorch_utils import (
     check_pytorch_source_version,
     configure_gpu_visibility,
     detect_pytorch_version,
+    setup_msvc_env,
     reconcile_agent_visibility_env,
 )
 
@@ -142,6 +143,7 @@ INDUCTOR_UNIT_TESTS = [
 
 def setup_env(pytorch_dir: Path, test_config: str, amdgpu_family: str = "") -> None:
     reconcile_agent_visibility_env()
+    setup_msvc_env()
 
     os.environ.setdefault("CI", "1")
     build_env = AMDGPU_FAMILY_TO_BUILD_ENV.get(

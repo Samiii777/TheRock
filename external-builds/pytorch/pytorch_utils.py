@@ -10,7 +10,9 @@ multiple ways to achieve isolation of GPUs in the ROCm software stack.
 """
 
 import os
+import platform
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -394,6 +396,87 @@ def detect_pytorch_version() -> str:
     """
     v = Version(get_package_version("torch"))
     return f"{v.major}.{v.minor}"
+
+
+def setup_msvc_env() -> bool:
+    """Put the MSVC toolchain on PATH on Windows so JIT C++ extensions can build.
+
+    Tests that use torch.utils.cpp_extension invoke "where cl" and fail with a
+    CalledProcessError if no compiler is on PATH. Visual Studio is not on PATH by
+    default, so locate it with vswhere and import the vcvars64.bat environment.
+
+    Returns True if cl is available afterwards.
+    """
+    if platform.system() != "Windows":
+        return True
+
+    if shutil.which("cl"):
+        return True
+
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", "")
+    vswhere = (
+        Path(program_files_x86)
+        / "Microsoft Visual Studio"
+        / "Installer"
+        / "vswhere.exe"
+    )
+    install_path = ""
+    if vswhere.is_file():
+        try:
+            result = subprocess.run(
+                [
+                    str(vswhere),
+                    "-latest",
+                    "-products",
+                    "*",
+                    "-requires",
+                    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                    "-property",
+                    "installationPath",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            install_path = result.stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            install_path = ""
+    vcvars = Path(install_path) / "VC" / "Auxiliary" / "Build" / "vcvars64.bat"
+    if not install_path or not vcvars.is_file():
+        print(
+            "[WARNING] No MSVC toolchain found on this Windows runner. Tests that "
+            "JIT-compile\n"
+            "          C++ extensions through torch.utils.cpp_extension will fail "
+            'with "where cl"\n'
+            "          returning a non-zero exit status. Install the Visual Studio "
+            '"Desktop\n'
+            '          development with C++" workload to run them.'
+        )
+        return False
+
+    try:
+        result = subprocess.run(
+            f'call "{vcvars}" >nul && set',
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        print(f"[WARNING] Failed to import the MSVC environment from {vcvars}")
+        return False
+
+    for line in result.stdout.splitlines():
+        name, separator, value = line.partition("=")
+        if separator:
+            os.environ[name] = value
+
+    if not shutil.which("cl"):
+        print(f"[WARNING] Imported {vcvars} but cl is still not on PATH")
+        return False
+
+    print(f"MSVC environment loaded from {vcvars}")
+    return True
 
 
 # A wheel is tagged with the date its build ran, which is normally a day or so

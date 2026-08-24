@@ -85,6 +85,7 @@ from pytorch_utils import (
     configure_gpu_visibility,
     detect_pytorch_version,
     reconcile_agent_visibility_env,
+    setup_msvc_env,
 )
 
 THIS_SCRIPT_DIR = Path(__file__).resolve().parent
@@ -102,6 +103,7 @@ def setup_env(pytorch_dir: str) -> None:
         - Modifies sys.path to include the test directory
     """
     reconcile_agent_visibility_env()
+    setup_msvc_env()
 
     os.environ["PYTORCH_PRINT_REPRO_ON_FAILURE"] = "0"
     os.environ["PYTORCH_TEST_WITH_ROCM"] = "1"
