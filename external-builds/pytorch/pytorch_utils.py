@@ -10,8 +10,10 @@ multiple ways to achieve isolation of GPUs in the ROCm software stack.
 """
 
 import os
+import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from importlib.metadata import version as get_package_version
@@ -394,19 +396,66 @@ def detect_pytorch_version() -> str:
     return f"{v.major}.{v.minor}"
 
 
+# A wheel is tagged with the date its build ran, which is normally a day or so
+# after the commit it was built from, so a small lead is expected. Real API drift
+# takes far longer than this to accumulate.
+PYTORCH_SOURCE_SKEW_GRACE_DAYS = 7
+
+
+def get_pytorch_source_date(pytorch_dir: Path) -> str:
+    """Return the commit date of the checked out PyTorch sources as YYYYMMDD.
+
+    Returns an empty string if the date cannot be determined.
+
+    Args:
+        pytorch_dir: Path to the PyTorch source directory.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%cd", "--date=format:%Y%m%d"],
+            cwd=pytorch_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    date = result.stdout.strip()
+    return date if date.isdigit() and len(date) == 8 else ""
+
+
+def get_wheel_build_date(installed_version: Version) -> str:
+    """Return the build date encoded in a ROCm torch wheel version as YYYYMMDD.
+
+    ROCm nightlies carry it in the local segment, e.g.
+    2.13.0a0+rocm7.13.0a20260416 -> 20260416. Returns "" if not present.
+
+    Args:
+        installed_version: Version of the installed torch package.
+    """
+    match = re.search(r"(20\d{6})", installed_version.local or "")
+    return match.group(1) if match else ""
+
+
 def check_pytorch_source_version(pytorch_dir: Path, allow_mismatch: bool) -> None:
-    """Verify that the PyTorch test source version matches the installed wheel.
+    """Verify that the PyTorch test sources match the installed wheel.
 
     Compares the major.minor version from <pytorch_dir>/version.txt against
-    the installed torch package. A mismatch causes confusing test failures
+    the installed torch package, then checks that the sources are not newer
+    than the wheel was built. A mismatch causes confusing test failures
     (missing attributes, changed APIs, collection errors) that look like real
     bugs but are just version skew.
+
+    version.txt is only bumped once per minor release, so on its own it cannot
+    detect skew within a release line: sources tracking a moving branch (the
+    default --repo-hashtag is "nightly") keep reporting the same major.minor
+    for months while APIs and error messages change underneath.
 
     Args:
         pytorch_dir: Path to the PyTorch source directory.
 
     Raises:
-        SystemExit: If there is a major.minor version mismatch.
+        SystemExit: If the sources and the installed wheel do not match.
     """
     version_file = pytorch_dir / "version.txt"
     if not version_file.exists():
@@ -439,6 +488,41 @@ def check_pytorch_source_version(pytorch_dir: Path, allow_mismatch: bool) -> Non
                 "[WARNING] allow_mismatch (--allow-version-mismatch) was set, so continuing anyway\n"
             )
             return
+        else:
+            print(
+                "[ERROR] Set allow_mismatch (--allow-version-mismatch) to bypass this check. Exiting"
+            )
+            sys.exit(1)
+
+    wheel_date = get_wheel_build_date(installed_version)
+    source_date = get_pytorch_source_date(pytorch_dir)
+
+    if not wheel_date or not source_date:
+        print(
+            "[WARNING] Could not determine the PyTorch source and/or wheel build date, "
+            "so only the major.minor version was verified."
+        )
+    elif (
+        datetime.strptime(source_date, "%Y%m%d")
+        - datetime.strptime(wheel_date, "%Y%m%d")
+    ).days > PYTORCH_SOURCE_SKEW_GRACE_DAYS:
+        print(
+            f"[ERROR] PyTorch test sources are newer than the installed wheel!\n"
+            f"  Test sources: committed {source_date} (in {pytorch_dir})\n"
+            f"  Installed wheel: built {wheel_date} ({installed_version})\n"
+            f"\n"
+            f"Both report {installed_version.major}.{installed_version.minor}, so the\n"
+            f"major.minor check passes, but version.txt is only bumped once per minor\n"
+            f"release and cannot detect drift within a release line. Newer test sources\n"
+            f"collect tests for APIs the wheel does not have and assert on error messages\n"
+            f"that were reworded after the wheel was built, producing failures that look\n"
+            f"like product bugs. Check out sources from around {wheel_date} (pass\n"
+            f"--repo-hashtag to pytorch_torch_repo.py) or install a newer wheel."
+        )
+        if allow_mismatch:
+            print(
+                "[WARNING] allow_mismatch (--allow-version-mismatch) was set, so continuing anyway\n"
+            )
         else:
             print(
                 "[ERROR] Set allow_mismatch (--allow-version-mismatch) to bypass this check. Exiting"
